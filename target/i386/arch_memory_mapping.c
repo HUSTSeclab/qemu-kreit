@@ -179,7 +179,7 @@ static void walk_pdpe2(MemoryMappingList *list, AddressSpace *as,
     }
 }
 
-#ifdef TARGET_X86_64
+#if TARGET_X86_64
 /* IA-32e Paging */
 static void walk_pdpe(MemoryMappingList *list, AddressSpace *as,
                       hwaddr pdpe_start_addr, int32_t a20_mask,

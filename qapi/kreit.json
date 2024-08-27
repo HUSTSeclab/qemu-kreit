@@ -1,0 +1,92 @@
+# -*- Mode: Python -*-
+# vim: filetype=python
+#
+# This work is licensed under the terms of the GNU GPL, version 2 or later.
+# See the COPYING file in the top-level directory.
+
+##
+# = Kreit
+##
+
+{ 'include': 'common.json' }
+
+##
+# @KreitBlockCoverage:
+#
+# Since: 2.1
+##
+{ 'struct': 'KreitBlockCoverage',
+  'data': {
+    'pc':         'uint64',
+    'size':       'size',
+    'pid':        'int' }}
+
+##
+# @kreit-block-coverage:
+#
+# Returns: a list of @KreitBlockCoverage.
+#
+# Since: 2.1
+#
+##
+{ 'command': 'kreit-block-coverage', 'returns': ['KreitBlockCoverage'], 'allow-preconfig': true }
+
+##
+# @KreitEdgeCoverage:
+#
+# Since: 2.1
+##
+{ 'struct': 'KreitEdgeCoverage',
+  'data': {
+    'edge':         'uint64',
+    'pid':        'int' }}
+
+##
+# @kreit-edge-coverage:
+#
+# Returns: a list of @KreitEdgeCoverage.
+#
+# Since: 2.1
+#
+##
+{ 'command': 'kreit-edge-coverage', 'returns': ['KreitEdgeCoverage'], 'allow-preconfig': true }
+
+##
+# @KreitThreadCpuData:
+#
+# Since: 2.1
+##
+{
+    'struct': 'KreitThreadCpuData',
+    'data': {
+        'cpuindex': 'uint64',
+        'bbcountkernel': 'uint64',
+        'bbcountuser': 'uint64',
+        'timekernel': 'uint64',
+        'timeuser': 'uint64'
+    }
+}
+
+##
+# @KreitThreadInstcount:
+#
+# Since: 2.1
+##
+{
+    'struct': 'KreitThreadInstcount',
+    'data': {
+        'pid': 'int',
+        'name': 'str',
+        'cpustatistics': ['KreitThreadCpuData']
+    }
+}
+
+##
+# @kreit-dump-instcount:
+#
+# Returns: a list of @KreitThreadInstcount.
+#
+# Since: 2.1
+#
+##
+{ 'command': 'kreit-dump-instcount', 'returns': [ 'KreitThreadInstcount' ], 'allow-preconfig': true }

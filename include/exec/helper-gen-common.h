@@ -15,4 +15,9 @@
 #include "exec/helper-gen.h.inc"
 #undef  HELPER_H
 
+/// kreit: kreit helper function here
+#define HELPER_H "kreit/kreit_helper.h"
+#include "exec/helper-gen.h.inc"
+#undef  HELPER_H
+
 #endif /* HELPER_GEN_COMMON_H */

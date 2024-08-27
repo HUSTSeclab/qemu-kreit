@@ -28,6 +28,9 @@
 #include "helper-tcg.h"
 #include "seg_helper.h"
 
+/// kreit: add interrupt tracing
+#include "kreit/instrument/instrument.h"
+
 int get_pg_mode(CPUX86State *env)
 {
     int pg_mode = 0;
@@ -1083,6 +1086,8 @@ void do_interrupt_all(X86CPU *cpu, int intno, int is_int,
                       int error_code, target_ulong next_eip, int is_hw)
 {
     CPUX86State *env = &cpu->env;
+
+    kreit_trace_interrupt(env, intno, error_code);
 
     if (qemu_loglevel_mask(CPU_LOG_INT)) {
         if ((env->cr[0] & CR0_PE_MASK)) {

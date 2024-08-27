@@ -150,6 +150,13 @@ option('libiscsi', type : 'feature', value : 'auto',
        description: 'libiscsi userspace initiator')
 option('libnfs', type : 'feature', value : 'auto',
        description: 'libnfs block device driver')
+
+# kreit: add libelf option for configure
+option('libelf', type : 'feature', value : 'auto',
+       description: 'libelf')
+option('libdwfile', type : 'feature', value : 'auto',
+       description: 'libdwfile supported, used by insn-patch app')
+
 option('mpath', type : 'feature', value : 'auto',
        description: 'Multipath persistent reservation passthrough')
 option('numa', type : 'feature', value : 'auto',

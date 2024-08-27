@@ -17,4 +17,9 @@
 #include "exec/helper-proto.h.inc"
 #undef  HELPER_H
 
+/// kreit: kreit helper function here
+#define HELPER_H "kreit/kreit_helper.h"
+#include "exec/helper-proto.h.inc"
+#undef  HELPER_H
+
 #endif /* HELPER_PROTO_COMMON_H */

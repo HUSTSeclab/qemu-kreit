@@ -92,6 +92,7 @@
 #include "qemu/config-file.h"
 #include "qemu/qemu-options.h"
 #include "qemu/main-loop.h"
+#include <stdbool.h>
 #ifdef CONFIG_VIRTFS
 #include "fsdev/qemu-fsdev.h"
 #endif
@@ -134,6 +135,9 @@
 #include "sysemu/iothread.h"
 #include "qemu/guest-random.h"
 #include "qemu/keyval.h"
+
+/// kreit: kreit_init
+#include "kreit/kreit.h"
 
 #define MAX_VIRTIO_CONSOLES 1
 
@@ -500,6 +504,46 @@ static QemuOptsList qemu_action_opts = {
         { /* end of list */ }
     },
 };
+
+/// kreit: qemu_kreit_opts
+static QemuOptsList qemu_kreit_opts = {
+    .name = "kreit",
+    .implied_opt_name = "target",
+    .merge_lists = true,
+    .head = QTAILQ_HEAD_INITIALIZER(qemu_kreit_opts.head),
+    .desc = {
+        {
+            .name = "target",
+            .type = QEMU_OPT_STRING,
+        },
+        {
+            .name = "kernel-info",
+            .type = QEMU_OPT_STRING,
+        },
+        { /* end of list */ }
+    },
+};
+
+/// kreit: qemu_kreitapp_opts
+static QemuOptsList qemu_kreitapp_opts = {
+    .name = "kreitapp",
+    .implied_opt_name = "appname",
+    .head = QTAILQ_HEAD_INITIALIZER(qemu_kreitapp_opts.head),
+    .desc = {
+        // empty for accepting any
+        { /* end of list */ }
+    },
+};
+
+/**
+ * Get machine options
+ *
+ * Returns: machine options (never null).
+ */
+static QemuOpts *qemu_get_machine_opts(void)
+{
+    return qemu_find_opts_singleton("machine");
+}
 
 const char *qemu_get_vm_name(void)
 {
@@ -2704,6 +2748,9 @@ void qemu_init(int argc, char **argv)
     qemu_add_opts(&qemu_semihosting_config_opts);
     qemu_add_opts(&qemu_fw_cfg_opts);
     qemu_add_opts(&qemu_action_opts);
+    /// kreit: qemu_kreit_opts
+    qemu_add_opts(&qemu_kreit_opts);
+    qemu_add_opts(&qemu_kreitapp_opts);
     module_call_init(MODULE_INIT_OPTS);
 
     error_init(argv[0]);
@@ -3519,6 +3566,17 @@ void qemu_init(int argc, char **argv)
             case QEMU_OPTION_enable_sync_profile:
                 qsp_enable();
                 break;
+            /// kreit: kreit option here
+            case QEMU_OPTION_kreit:
+                opts = qemu_opts_parse_noisily(qemu_find_opts("kreit"), optarg, true);
+                break;
+            case QEMU_OPTION_kreitapp:
+                opts = qemu_opts_parse_noisily(qemu_find_opts("kreitapp"),
+                                               optarg, true);
+                if (!opts) {
+                    exit(1);
+                }
+                break;
             case QEMU_OPTION_nouserconfig:
                 /* Nothing to be parsed here. Especially, do not error out below. */
                 break;
@@ -3651,4 +3709,7 @@ void qemu_init(int argc, char **argv)
     accel_setup_post(current_machine);
     os_setup_post();
     resume_mux_open();
+
+    /// kreit: init recorder here
+    kreit_init();
 }

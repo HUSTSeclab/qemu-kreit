@@ -71,6 +71,12 @@ if have_system or have_tools
   ]
 endif
 
+# kreit: add kreit qapi submodule
+  qapi_all_modules += [
+    'kreit',
+  ]
+
+
 qapi_nonmodule_outputs = [
   'qapi-introspect.c', 'qapi-introspect.h',
   'qapi-types.c', 'qapi-types.h',

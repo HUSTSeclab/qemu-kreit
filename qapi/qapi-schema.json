@@ -79,3 +79,7 @@
 { 'include': 'virtio.json' }
 { 'include': 'cryptodev.json' }
 { 'include': 'cxl.json' }
+
+
+# kreit: coverage qapi interface
+{ 'include': 'kreit.json' }

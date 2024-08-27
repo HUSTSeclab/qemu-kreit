@@ -16,6 +16,9 @@
 #include "tcg/tcg-op-common.h"
 #include "internal.h"
 
+/// kreit: kreit trace header
+#include "kreit/instrument/instrument.h"
+
 static void set_can_do_io(DisasContextBase *db, bool val)
 {
     if (db->saved_can_do_io != val) {
@@ -88,6 +91,9 @@ static TCGOp *gen_tb_start(DisasContextBase *db, uint32_t cflags)
      * very easy to forget doing it in the translator.
      */
     set_can_do_io(db, db->max_insns == 1 && (cflags & CF_LAST_IO));
+
+    // kreit: gen tb start instrumentation
+    kreit_trace_gen_tb_start(db->pc_first);
 
     return icount_start_insn;
 }
@@ -174,7 +180,10 @@ void translator_loop(CPUState *cpu, TranslationBlock *tb, int *max_insns,
             /* Accept I/O on the last instruction.  */
             set_can_do_io(db, true);
         }
+        /// kreit: insturment and modify the IR before and after insn trans
+        kreit_trace_insn_trans_pre(db, cpu);
         ops->translate_insn(db, cpu);
+        kreit_trace_insn_trans_post(db, cpu);
 
         /*
          * We can't instrument after instructions that change control
@@ -213,6 +222,9 @@ void translator_loop(CPUState *cpu, TranslationBlock *tb, int *max_insns,
     /* The disas_log hook may use these values rather than recompute.  */
     tb->size = db->pc_next - db->pc_first;
     tb->icount = db->num_insns;
+
+    // kreit: trace the translation process here
+    kreit_trace_tb_translate(cpu->env_ptr, db->pc_first, tb->size);
 
     if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)
         && qemu_log_in_addr_range(db->pc_first)) {

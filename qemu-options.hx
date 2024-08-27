@@ -5727,6 +5727,29 @@ SRST
             (qemu) qom-set /objects/iothread1 poll-max-ns 100000
 ERST
 
+HXCOMM kreit: adding vmlinux object file and parameter for tracer
+DEF("kreit", HAS_ARG, QEMU_OPTION_kreit, \
+    "coverage: enable code coverage tracing\n" \
+    "vmlinux use vmlinux for symbol and debug infomation extraction\n" \
+    "pid-offset provide the offset of pid in task_struct\n" \
+    "target: set target as linux kernel or qnx (default linux)\n", QEMU_ARCH_ALL)
+SRST
+``-kreit``
+    coverage: enable code coverage tracing.
+    vmlinux: use vmlinux for symbol and debug infomation extraction.
+    pid-offset: provide the offset of pid in task_struct.
+    pname-offset: provide the offset of comm in task_struct.
+    target: set target as linux kernel or qnx (default linux).
+ERST
+
+HXCOMM kreit: kreitapp parser
+DEF("kreitapp", HAS_ARG, QEMU_OPTION_kreitapp, \
+    "whatever\n", \
+    QEMU_ARCH_ALL)
+SRST
+``-kreitapp``
+    comming soon
+ERST
 
 HXCOMM This is the last statement. Insert new options before this line!
 

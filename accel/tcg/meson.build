@@ -9,6 +9,10 @@ tcg_ss.add(files(
   'translate-all.c',
   'translator.c',
 ))
+
+# kreit: add addtion source files
+tcg_ss.add(files('../../kreit/kreit_helper.c'))
+
 tcg_ss.add(when: 'CONFIG_USER_ONLY', if_true: files('user-exec.c'))
 tcg_ss.add(when: 'CONFIG_SYSTEM_ONLY', if_false: files('user-exec-stub.c'))
 tcg_ss.add(when: 'CONFIG_PLUGIN', if_true: [files('plugin-gen.c')])

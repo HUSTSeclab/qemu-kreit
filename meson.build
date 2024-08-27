@@ -864,6 +864,15 @@ if not get_option('linux_io_uring').auto() or have_block
   endif
 endif
 
+# kreit: dependency
+
+libelf = not_found
+if not get_option('libelf').auto() or have_system or have_user
+  libelf = dependency('libelf',
+                      method: 'pkg-config',
+                      required: get_option('libelf'))
+endif
+
 libnfs = not_found
 if not get_option('libnfs').auto() or have_block
   libnfs = dependency('libnfs', version: '>=1.9.3',
@@ -3152,6 +3161,8 @@ if have_system
   hx_headers += [
     ['hmp-commands.hx', 'hmp-commands.h'],
     ['hmp-commands-info.hx', 'hmp-commands-info.h'],
+    # kreit: customized hmp commands
+    ['kreit/kreit-hmp-commands.hx', 'kreit-hmp-commands.h'],
   ]
 endif
 foreach d : hx_headers
@@ -3185,6 +3196,8 @@ stub_ss = ss.source_set()
 trace_ss = ss.source_set()
 user_ss = ss.source_set()
 util_ss = ss.source_set()
+# kreit: get kreit source
+kreit_ss = ss.source_set()
 
 # accel modules
 qtest_module_ss = ss.source_set()
@@ -3196,6 +3209,8 @@ hw_arch = {}
 target_arch = {}
 target_softmmu_arch = {}
 target_user_arch = {}
+# kreit: add kreit target directory
+target_kreit_arch = {}
 
 ###############
 # Trace files #
@@ -3315,6 +3330,9 @@ if targetos == 'linux' and have_vhost_user
   libvhost_user = subproject('libvhost-user')
   vhost_user = libvhost_user.get_variable('vhost_user_dep')
 endif
+
+# kreit: simply add the kreit as a fiexed subdir temporary
+subdir('kreit')
 
 libvduse = not_found
 if have_libvduse
@@ -3670,6 +3688,8 @@ if emulator_modules.length() > 0
 endif
 
 system_ss.add(authz, blockdev, chardev, crypto, io, qmp)
+#kreit: add kreit static library
+specific_ss.add_all(kreit_ss)
 common_ss.add(qom, qemuutil)
 
 common_ss.add_all(when: 'CONFIG_SYSTEM_ONLY', if_true: [system_ss])
@@ -3704,6 +3724,8 @@ foreach target : target_dirs
 
   config_target += config_host
   target_inc = [include_directories('target' / config_target['TARGET_BASE_ARCH'])]
+  # kreit: add target directory in kreit
+  target_inc += include_directories('kreit/target/' / config_target['TARGET_BASE_ARCH'])
   if targetos == 'linux'
     target_inc += include_directories('linux-headers', is_system: true)
   endif
@@ -3767,6 +3789,11 @@ foreach target : target_dirs
   arch_srcs += t.sources()
   arch_deps += t.dependencies()
 
+  # kreit: add kreit target directory
+  t = target_kreit_arch[target_base_arch].apply(config_target, strict: false)
+  arch_srcs += t.sources()
+  arch_deps += t.dependencies()
+
   target_common = common_ss.apply(config_target, strict: false)
   objects = common_all.extract_objects(target_common.sources())
   deps = target_common.dependencies()
@@ -3774,6 +3801,8 @@ foreach target : target_dirs
   target_specific = specific_ss.apply(config_target, strict: false)
   arch_srcs += target_specific.sources()
   arch_deps += target_specific.dependencies()
+  # kreit: add extra dependencies
+  arch_deps += [libelf]
 
   lib = static_library('qemu-' + target,
                  sources: arch_srcs + genh,
@@ -4318,6 +4347,11 @@ summary_info += {'FUSE lseek':        fuse_lseek.found()}
 summary_info += {'selinux':           selinux}
 summary_info += {'libdw':             libdw}
 summary(summary_info, bool_yn: true, section: 'Dependencies')
+
+# kreit: kreit related summary info
+summary_info = {}
+summary_info += {'libelf':             libelf}
+summary(summary_info, bool_yn: true, section: 'Kreit related')
 
 if not supported_cpus.contains(cpu)
   message()

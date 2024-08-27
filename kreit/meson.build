@@ -1,0 +1,11 @@
+kreit_ss.add(files('kreit_main.c', 'kreit_hmp.c', 'kreit_common.c'))
+
+subdir('target')
+subdir('instrument')
+subdir('context-switch')
+subdir('die-hook')
+subdir('tbstart')
+subdir('instcount')
+subdir('coverage')
+subdir('sanitizer')
+subdir('instrace')
