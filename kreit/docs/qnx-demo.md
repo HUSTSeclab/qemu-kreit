@@ -9,7 +9,7 @@ For convenience, we prepared a docker image for reproducing the testcases,
 run the following command:
 
 ```sh
-docker run --rm -i -t elfincanopy/qnx-asan-demo:lastest /bin/bash
+docker run --rm -i -t elfincanopy/qnx-asan-demo:latest /bin/bash
 
 # In the docker image shell:
 /workspace/run-qemu.sh
