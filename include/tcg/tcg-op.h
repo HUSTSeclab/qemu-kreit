@@ -22,6 +22,9 @@
 # error
 #endif
 
+/// kreit: sanitizer support
+#include "kreit/sanitizer/asan/asan-common.h"
+
 #ifndef TARGET_INSN_START_EXTRA_WORDS
 static inline void tcg_gen_insn_start(target_ulong pc)
 {
@@ -71,36 +74,96 @@ typedef TCGv_i64 TCGv;
 static inline void
 tcg_gen_qemu_ld_i32(TCGv_i32 v, TCGv a, TCGArg i, MemOp m)
 {
+    if (asan_state) {
+        switch (m & MO_SIZE) {
+            case MO_128: gen_helper_qasan_load16(cpu_env, a); break;
+            case MO_64: gen_helper_qasan_load8(cpu_env, a); break;
+            case MO_32: gen_helper_qasan_load4(cpu_env, a); break;
+            case MO_16: gen_helper_qasan_load2(cpu_env, a); break;
+            case MO_8:  gen_helper_qasan_load1(cpu_env, a); break;
+            default: gen_helper_qasan_load4(cpu_env, a); break;
+        }
+    }
     tcg_gen_qemu_ld_i32_chk(v, tcgv_tl_temp(a), i, m, TCG_TYPE_TL);
 }
 
 static inline void
 tcg_gen_qemu_st_i32(TCGv_i32 v, TCGv a, TCGArg i, MemOp m)
 {
+    if (asan_state) {
+        switch (m & MO_SIZE) {
+            case MO_128: gen_helper_qasan_store16(cpu_env, a); break;
+            case MO_64: gen_helper_qasan_store8(cpu_env, a); break;
+            case MO_32: gen_helper_qasan_store4(cpu_env, a); break;
+            case MO_16: gen_helper_qasan_store2(cpu_env, a); break;
+            case MO_8:  gen_helper_qasan_store1(cpu_env, a); break;
+            default: gen_helper_qasan_store4(cpu_env, a); break;
+        }
+    }
     tcg_gen_qemu_st_i32_chk(v, tcgv_tl_temp(a), i, m, TCG_TYPE_TL);
 }
 
 static inline void
 tcg_gen_qemu_ld_i64(TCGv_i64 v, TCGv a, TCGArg i, MemOp m)
 {
+    if (asan_state) {
+        switch (m & MO_SIZE) {
+            case MO_128: gen_helper_qasan_load16(cpu_env, a); break;
+            case MO_64: gen_helper_qasan_load8(cpu_env, a); break;
+            case MO_32: gen_helper_qasan_load4(cpu_env, a); break;
+            case MO_16: gen_helper_qasan_load2(cpu_env, a); break;
+            case MO_8:  gen_helper_qasan_load1(cpu_env, a); break;
+            default: gen_helper_qasan_load8(cpu_env, a); break;
+        }
+    }
     tcg_gen_qemu_ld_i64_chk(v, tcgv_tl_temp(a), i, m, TCG_TYPE_TL);
 }
 
 static inline void
 tcg_gen_qemu_st_i64(TCGv_i64 v, TCGv a, TCGArg i, MemOp m)
 {
+    if (asan_state) {
+        switch (m & MO_SIZE) {
+            case MO_128: gen_helper_qasan_store16(cpu_env, a); break;
+            case MO_64: gen_helper_qasan_store8(cpu_env, a); break;
+            case MO_32: gen_helper_qasan_store4(cpu_env, a); break;
+            case MO_16: gen_helper_qasan_store2(cpu_env, a); break;
+            case MO_8:  gen_helper_qasan_store1(cpu_env, a); break;
+            default: gen_helper_qasan_store8(cpu_env, a); break;
+        }
+    }
     tcg_gen_qemu_st_i64_chk(v, tcgv_tl_temp(a), i, m, TCG_TYPE_TL);
 }
 
 static inline void
 tcg_gen_qemu_ld_i128(TCGv_i128 v, TCGv a, TCGArg i, MemOp m)
 {
+    if (asan_state) {
+        switch (m & MO_SIZE) {
+            case MO_128: gen_helper_qasan_load16(cpu_env, a); break;
+            case MO_64: gen_helper_qasan_load8(cpu_env, a); break;
+            case MO_32: gen_helper_qasan_load4(cpu_env, a); break;
+            case MO_16: gen_helper_qasan_load2(cpu_env, a); break;
+            case MO_8:  gen_helper_qasan_load1(cpu_env, a); break;
+            default: gen_helper_qasan_load16(cpu_env, a); break;
+        }
+    }
     tcg_gen_qemu_ld_i128_chk(v, tcgv_tl_temp(a), i, m, TCG_TYPE_TL);
 }
 
 static inline void
 tcg_gen_qemu_st_i128(TCGv_i128 v, TCGv a, TCGArg i, MemOp m)
 {
+    if (asan_state) {
+        switch (m & MO_SIZE) {
+            case MO_128: gen_helper_qasan_store16(cpu_env, a); break;
+            case MO_64: gen_helper_qasan_store8(cpu_env, a); break;
+            case MO_32: gen_helper_qasan_store4(cpu_env, a); break;
+            case MO_16: gen_helper_qasan_store2(cpu_env, a); break;
+            case MO_8:  gen_helper_qasan_store1(cpu_env, a); break;
+            default: gen_helper_qasan_store16(cpu_env, a); break;
+        }
+    }
     tcg_gen_qemu_st_i128_chk(v, tcgv_tl_temp(a), i, m, TCG_TYPE_TL);
 }
 
