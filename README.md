@@ -1,6 +1,9 @@
 # QEMU-KREIT README
 
-This is a modified qemu based on v8.1.3, which is aimed to provided various instrumentation for binary-only kernel fuzzing, crash analysis and so on.
+This is a modified qemu based on v8.1.3, which is aimed to provided various 
+instrumentation for binary-only kernel fuzzing, crash analysis and so on.
+
+Some designs and code are inspired by [QASAN](https://github.com/AFLplusplus/AFLplusplus/tree/stable/qemu_mode/libqasan).
 
 ## Basic Function
 
@@ -17,4 +20,5 @@ This is a modified qemu based on v8.1.3, which is aimed to provided various inst
 
 ## State
 
-Now the project is still in demo state, for reproducing please refer to xxx.
+Now the project is still in demo state, for reproducing please refer to 
+[qnx-demo](kreit/docs/qnx-demo.md). Only qnx demo is valid now.
