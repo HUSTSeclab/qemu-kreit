@@ -75,12 +75,15 @@ KreitAppState *kreitapp_init_by_name(const char *name)
     if (kas)
         return kas;
 
+    // init the dependencies first
     char *class_name = g_strdup_printf(KREITAPP_CLASS_NAME("%s"), name);
+
+    kac = KREITAPP_CLASS(object_class_by_name(class_name));
+    g_list_foreach(kac->__app_dependencies, gfunc_init_app_dependencies, NULL);
+
     kas = KREITAPP_STATE(object_new(class_name));
     g_free(class_name);
 
-    kac = KREITAPP_GET_CLASS(kas);
-    g_list_foreach(kac->__app_dependencies, gfunc_init_app_dependencies, NULL);
     g_hash_table_insert(app_list, (gpointer)name, kas);
 
     return kas;
