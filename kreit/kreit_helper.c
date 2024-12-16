@@ -45,10 +45,7 @@ void HELPER(kreit_trace_die)(CPUArchState *env)
 
 void HELPER(kreit_trace_asan_hook)(CPUArchState *env, uint32_t hook_index)
 {
-    KreitAsanInstrInfo hook;
-    hook = asan_state->asan_hook[hook_index];
-    hook.env = env;
-    kreit_trace_asan_hook(&hook);
+    kreit_trace_asan_hook(env, hook_index);
 }
 
 void HELPER(qasan_load1)(CPUArchState *env, target_ulong addr)

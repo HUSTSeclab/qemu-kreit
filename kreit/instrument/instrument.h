@@ -125,9 +125,18 @@ typedef struct KreitSwitchPair {
 #define kreit_trace_die(env_) \
     __kreit_instrument(KREIT_INSTR_TRACE_DIE, (void *)env_)
 
-#define kreit_trace_asan_hook(hook) \
+typedef struct KreitAsanHookData {
+    void *env; /* CPUArchState */
+    int hook_index;
+} KreitAsanHookData;
+
+#define kreit_trace_asan_hook(env_, hook_index_) \
     do { \
-        __kreit_instrument(KREIT_INSTR_ASAN_HOOK, hook); \
+        KreitAsanHookData tmp = { \
+            .env = env_, \
+            .hook_index = hook_index_, \
+        }; \
+        __kreit_instrument(KREIT_INSTR_ASAN_HOOK, &tmp); \
     } while(0)
 
 typedef struct KreitDisasContext {

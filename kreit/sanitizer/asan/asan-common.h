@@ -8,6 +8,7 @@
 #include "qemu/timer.h"
 
 typedef enum AsanHookType {
+    ASAN_HOOK_TYPE_INVALID,
     ASAN_HOOK_ALLOC_KMEM_CACHE,
     ASAN_HOOK_ALLOC_SIZE_IN_REGS,
     ASAN_HOOK_ALLOC_BULK,
@@ -18,10 +19,10 @@ typedef enum AsanHookType {
     ASAN_HOOK_CLEAR_PAGE_REP,
     ASAN_HOOK_HANDLE_MM_PAGE_FAULT,
     ASAN_HOOK_QNX_SREALLOC,
+    ASAN_HOOK_TYPE_END,
 } AsanHookType;
 
 typedef struct KreitAsanInstrInfo {
-    CPUArchState *env;
     AsanHookType type;
     int param_order;
     vaddr addr;
@@ -30,17 +31,13 @@ typedef struct KreitAsanInstrInfo {
 typedef struct AsanAllocatedInfo {
     bool in_use;
 
-    AsanHookType hook_type;
+    // AsanHookType hook_type;
+    int pid;
     vaddr asan_chunk_start;
     size_t request_size;
     size_t chunk_size;
     size_t redzone_size;
-    int pid;
     vaddr allocated_at;
-    bool need_poison; // tmp hack
-
-    size_t bulk_nr;
-    vaddr bulk_array_addr;
 } AsanAllocatedInfo;
 
 typedef struct KreitAsanState KreitAsanState;
@@ -48,24 +45,34 @@ typedef struct AsanThreadInfo AsanThreadInfo;
 typedef struct KreitPendingHook KreitPendingHook;
 
 typedef struct AsanThreadInfo {
+    int pid;
     bool asan_enabled;
     char process_name[PROCESS_NAME_LENGTH];
 
-    // vaddr pending_ret_addr;
-    // AsanAllocatedInfo *pending_allocated_info;
-    // KreitAsanInstrInfo pending_hook;
-    // void (*trace_finished)(KreitAsanState *appdata, AsanThreadInfo *thread_info);
+    // context info
 } AsanThreadInfo;
 
 typedef struct KreitPendingHook {
+    // hook info
+    KreitAsanInstrInfo* hook_info;
+
+    // context info
+    AsanThreadInfo *thread_info;
     vaddr ret_addr;
     vaddr stack_ptr;
     int cpl;
+
     bool staged_asan_state;
+    void (*trace_start)(KreitAsanState *appdata, CPUArchState *env, KreitPendingHook *thread_info);
     void (*trace_finished)(KreitAsanState *appdata, CPUArchState *env, KreitPendingHook *thread_info);
 
     AsanAllocatedInfo *allocated_info;
 
+    // bulk info
+    size_t nr_bulk;
+    vaddr bulk_array;
+
+    // qnx assistance info
     size_t qnx_old_size;
     size_t qnx_new_size;
 } KreitPendingHook;

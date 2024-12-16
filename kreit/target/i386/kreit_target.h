@@ -59,11 +59,10 @@ static const int abi_param_order[] = {
 
 static inline uint64_t kreit_get_abi_param(CPUArchState *env, int param_order)
 {
-    param_order = param_order - 1;
-    if (param_order >= sizeof(abi_param_order) / sizeof(int))
+    if (param_order - 1 >= sizeof(abi_param_order) / sizeof(int))
         return 0;
 
-    return env->regs[abi_param_order[param_order]];
+    return env->regs[abi_param_order[param_order - 1]];
 }
 
 static inline void kreit_set_abi_reg_param(CPUArchState *env, int param_order, uint64_t val)
