@@ -79,9 +79,31 @@ static inline uint64_t kreit_get_return_value(CPUArchState *env)
     return env->regs[R_EAX];
 }
 
+static inline void kreit_set_return_value(CPUArchState *env, uint64_t val)
+{
+    env->regs[R_EAX] = val;
+}
+
 static inline uint64_t kreit_get_stack_ptr(CPUArchState *env)
 {
     return env->regs[R_ESP];
+}
+
+static inline void kreit_set_stack_ptr(CPUArchState *env, uint64_t val)
+{
+    env->regs[R_ESP] = val;
+}
+
+static inline void *kreit_get_regular_register_buf(CPUArchState *env)
+{
+    void *buf = g_malloc(sizeof(env->regs));
+    memcpy(buf, env->regs, sizeof(env->regs));
+    return buf;
+}
+
+static inline void kreit_set_regular_register_buf(CPUArchState *env, void *buf)
+{
+    memcpy(env->regs, buf, sizeof(env->regs));
 }
 
 #define KREIT_E_MACHINE EM_X86_64
