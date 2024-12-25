@@ -727,7 +727,7 @@ static void app_asan_trace_tb_start(void *instr_data, void *userdata)
 
     thread_info = pending_hook->thread_info;
     if (thread_info->pid != pid) {
-        qemu_log("fatal: function finished in different thread.\n");
+        qemu_log("function finished in different thread.\n");
         qemu_log("\talloc in thread %d, finished in thread %d\n", thread_info->pid, pid);
         /// TODO: Check why crash here in qnx.
         // g_assert(0);

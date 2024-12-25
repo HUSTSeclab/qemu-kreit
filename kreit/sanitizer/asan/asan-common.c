@@ -856,7 +856,8 @@ int asan_giovese_report_and_crash(int access_type, vaddr addr, size_t n,
     if (thread_info)
         thread_pname = thread_info->process_name;
 
-    qemu_log("asan: cpu %d pid: %d (%s): crash at %#018lx, error: %s\n", current_cpu->cpu_index, pid, thread_pname, curr_pc, error_type);
+    qemu_log("QKASAN: %s in %#018lx\n",error_type, curr_pc);
+    qemu_log("\tcpu %d pid: %d (%s)\n: ", current_cpu->cpu_index, pid, thread_pname);
     qemu_log("\ttry to %s on address %#018lx, size %ld\n", get_access_type_string(access_type), addr, n);
 
     if ((access_type == ACCESS_TYPE_DOUBLE_FREE) || !strcmp("heap-use-after-free", error_type))
