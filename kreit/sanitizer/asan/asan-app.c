@@ -572,7 +572,6 @@ static void asan_trace_qnx_srealloc_finished(KreitAsanState *appdata, CPUArchSta
 
         if (allocated_info) {
             allocated_info->asan_chunk_start = ret_ptr;
-            allocated_info->allocated_at = ret_ptr;
             allocated_info->in_use = true;
             asan_unpoison_region(ret_ptr, allocated_info->chunk_size);
 
