@@ -570,7 +570,7 @@ static void asan_trace_qnx_srealloc_finished(KreitAsanState *appdata, CPUArchSta
     if (pending_hook->qnx_new_size) {
         allocated_info = pending_hook->allocated_info;
 
-        if (allocated_info) {
+        if (ret_ptr) {
             allocated_info->asan_chunk_start = ret_ptr;
             allocated_info->in_use = true;
             asan_unpoison_region(ret_ptr, allocated_info->chunk_size);
@@ -581,6 +581,9 @@ static void asan_trace_qnx_srealloc_finished(KreitAsanState *appdata, CPUArchSta
             qemu_spin_lock(&appdata->asan_allocated_info_lock);
             g_hash_table_insert(appdata->asan_allocated_info, (gpointer) ret_ptr, allocated_info);
             qemu_spin_unlock(&appdata->asan_allocated_info_lock);
+        } else {
+            qemu_log("\tsrealloc alloc memory failed.\n");
+            g_free(allocated_info);
         }
 
         pending_hook->allocated_info = NULL;
