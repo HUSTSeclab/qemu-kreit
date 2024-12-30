@@ -168,6 +168,7 @@ static void asan_trace_linux_kmem_cache_alloc(KreitAsanState *appdata,
         thread_info->in_kmem_cache_alloc = true;
         thread_info->need_retry_alloc = true;
         thread_info->last_allocated_addr = 0;
+        thread_info->last_last_allocated_addr = 0;
         thread_info->storaged_regs = kreit_get_regular_register_buf(env);
         thread_info->align_size = align_size;
 
@@ -221,6 +222,7 @@ static void asan_trace_linux_kmem_cache_alloc_finished(KreitAsanState *appdata,
     AsanAllocatedInfo *allocated_info = thread_info->kmem_cache_allocated_info;
     vaddr alloc_ret_val;
     size_t asan_aligned_size;
+    bool alloc_end = false;
 
     // restore the asan state
     thread_info->asan_enabled = pending_hook->staged_asan_state;
@@ -245,8 +247,13 @@ static void asan_trace_linux_kmem_cache_alloc_finished(KreitAsanState *appdata,
     }
 
     asan_aligned_size = ROUND_UP(allocated_info->request_size, thread_info->align_size);
+    if (alloc_ret_val - thread_info->last_allocated_addr == asan_aligned_size)
+        alloc_end = true;
     if (alloc_ret_val - thread_info->last_allocated_addr ==
-        asan_aligned_size) {
+        thread_info->last_allocated_addr - thread_info->last_last_allocated_addr)
+        alloc_end = true;
+
+    if (alloc_end) {
         thread_info->need_retry_alloc = false;
         allocated_info->asan_chunk_start = thread_info->last_allocated_addr;
         allocated_info->in_use = true;
@@ -260,6 +267,7 @@ static void asan_trace_linux_kmem_cache_alloc_finished(KreitAsanState *appdata,
             allocated_info);
         qemu_spin_unlock(&appdata->asan_allocated_info_lock);
     } else {
+        thread_info->last_last_allocated_addr = thread_info->last_allocated_addr;
         thread_info->last_allocated_addr = alloc_ret_val;
     }
 }
