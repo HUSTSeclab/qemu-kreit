@@ -582,7 +582,7 @@ static void asan_trace_qnx_srealloc_finished(KreitAsanState *appdata, CPUArchSta
             g_hash_table_insert(appdata->asan_allocated_info, (gpointer) ret_ptr, allocated_info);
             qemu_spin_unlock(&appdata->asan_allocated_info_lock);
         } else {
-            qemu_log("\tsrealloc alloc memory failed.\n");
+            // qemu_log("\tsrealloc alloc memory failed.\n");
             g_free(allocated_info);
         }
 
@@ -729,8 +729,8 @@ static void app_asan_trace_tb_start(void *instr_data, void *userdata)
 
     thread_info = pending_hook->thread_info;
     if (thread_info->pid != pid) {
-        qemu_log("function finished in different thread.\n");
-        qemu_log("\talloc in thread %d, finished in thread %d\n", thread_info->pid, pid);
+        // qemu_log("function finished in different thread.\n");
+        // qemu_log("\talloc in thread %d, finished in thread %d\n", thread_info->pid, pid);
         /// TODO: Check why crash here in qnx.
         // g_assert(0);
     }
