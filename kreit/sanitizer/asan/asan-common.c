@@ -881,9 +881,9 @@ int asan_giovese_report_and_crash(int access_type, vaddr addr, size_t n,
     // else
     //     print_allocated_info(addr, true);
 
-    qemu_log("\tfreed chunk info:\n");
+    qemu_log("Freed chunk info:\n");
     print_allocated_info(addr, false);
-    qemu_log("\tin used chunk info:\n");
+    qemu_log("In used chunk info:\n");
     print_allocated_info(addr, true);
 
     print_shadow(fault_addr);

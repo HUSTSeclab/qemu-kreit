@@ -176,6 +176,7 @@ static void asan_trace_linux_kmem_cache_alloc(KreitAsanState *appdata,
         thread_info->need_retry_alloc = true;
         thread_info->last_allocated_addr = 0;
         thread_info->last_last_allocated_addr = 0;
+        thread_info->alloc_count = 0;
         thread_info->storaged_regs = kreit_get_regular_register_buf(env);
         thread_info->align_size = align_size;
 
@@ -230,6 +231,7 @@ static void asan_trace_linux_kmem_cache_alloc_finished(KreitAsanState *appdata,
     vaddr alloc_ret_val;
     size_t asan_aligned_size;
     bool alloc_end = false;
+    bool exceed_max_retry = false;
 
     // restore the asan state
     thread_info->asan_enabled = pending_hook->staged_asan_state;
@@ -259,8 +261,16 @@ static void asan_trace_linux_kmem_cache_alloc_finished(KreitAsanState *appdata,
     if (alloc_ret_val - thread_info->last_allocated_addr ==
         thread_info->last_allocated_addr - thread_info->last_last_allocated_addr)
         alloc_end = true;
+    if (alloc_ret_val < thread_info->last_allocated_addr)
+        alloc_end = false;
 
-    if (alloc_end) {
+    thread_info->alloc_count++;
+    if (thread_info->alloc_count > 10) {
+        alloc_end = true;
+        exceed_max_retry = true;
+    }
+
+    if (alloc_end && !exceed_max_retry) {
         thread_info->need_retry_alloc = false;
         allocated_info->asan_chunk_start = thread_info->last_allocated_addr;
         allocated_info->in_use = true;
@@ -268,6 +278,19 @@ static void asan_trace_linux_kmem_cache_alloc_finished(KreitAsanState *appdata,
         asan_unpoison_region(allocated_info->asan_chunk_start,
             allocated_info->chunk_size);
         asan_poison_region(alloc_ret_val, allocated_info->redzone_size, ASAN_HEAP_RIGHT_RZ);
+        qemu_spin_lock(&appdata->asan_allocated_info_lock);
+        g_hash_table_insert(appdata->asan_allocated_info,
+            (gpointer) allocated_info->asan_chunk_start,
+            allocated_info);
+        qemu_spin_unlock(&appdata->asan_allocated_info_lock);
+    } else if (alloc_end && exceed_max_retry) {
+        thread_info->need_retry_alloc = false;
+        allocated_info->asan_chunk_start = thread_info->last_allocated_addr;
+        allocated_info->in_use = true;
+
+        allocated_info->chunk_size = allocated_info->chunk_size >> 1;
+        asan_unpoison_region(allocated_info->asan_chunk_start,
+            allocated_info->chunk_size);
         qemu_spin_lock(&appdata->asan_allocated_info_lock);
         g_hash_table_insert(appdata->asan_allocated_info,
             (gpointer) allocated_info->asan_chunk_start,

@@ -60,6 +60,7 @@ typedef struct AsanThreadInfo {
     bool need_retry_alloc;
     vaddr last_allocated_addr;
     vaddr last_last_allocated_addr;
+    int alloc_count;
     AsanAllocatedInfo *kmem_cache_allocated_info;
     void *storaged_regs;
     size_t align_size;
