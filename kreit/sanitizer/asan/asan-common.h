@@ -39,6 +39,9 @@ typedef struct AsanAllocatedInfo {
     size_t chunk_size;
     size_t redzone_size;
     vaddr allocated_at;
+
+    vaddr free_at;
+    int free_pid;
 } AsanAllocatedInfo;
 
 typedef struct KreitAsanState KreitAsanState;

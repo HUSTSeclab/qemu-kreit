@@ -56,6 +56,10 @@ void asan_poison_region(vaddr ptr, size_t n, uint8_t poison_byte)
 
     if (kreitapp_get_verbose(OBJECT(asan_state)) >= 1)
         qemu_log("asan: poison range %#018lx - %#018lx\n", ptr, ptr + n);
+
+    if (n == 0)
+        return;
+
     // process partial bytes
     if (start & 0x7) {
         shadow_addr = get_shadow_addr(start);
@@ -80,6 +84,10 @@ void asan_unpoison_region(vaddr ptr, size_t n)
 {
     if (kreitapp_get_verbose(OBJECT(asan_state)) >= 1)
         qemu_log("asan: unpoison range %#018lx - %#018lx\n", ptr, ptr + n);
+
+    if (n == 0)
+        return;
+
     void *start = get_shadow_addr(ptr);
     size_t shadow_size = ROUND_UP(n, 8) >> 3;
     memset(start, 0, shadow_size);
@@ -734,7 +742,8 @@ static void gfunc_print_allocated_chunk(gpointer _not_used, gpointer _allocated_
     struct allocated_info_search_context *ctx = _userdata;
     vaddr addr = ctx->search_addr;
     AsanThreadInfo *thread_info;
-    char *thread_pname = NULL;
+    char *alloc_thread_pname = NULL;
+    char *free_thread_pname = NULL;
 
     // qemu_log("ptr: %#018lx size: %ld\n", allocated_info->asan_chunk_start, allocated_info->chunk_size);
 
@@ -752,12 +761,19 @@ static void gfunc_print_allocated_chunk(gpointer _not_used, gpointer _allocated_
 
     qemu_spin_lock(&asan_state->asan_threadinfo_lock);
     thread_info = g_hash_table_lookup(asan_state->asan_threadinfo, thread_info_hash_key(allocated_info->pid, current_cpu->cpu_index));
-    qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
     if (thread_info)
-        thread_pname = thread_info->process_name;
+        alloc_thread_pname = thread_info->process_name;
+    if (!ctx->find_in_use) {
+    thread_info = g_hash_table_lookup(asan_state->asan_threadinfo, thread_info_hash_key(allocated_info->free_pid, current_cpu->cpu_index));
+    if (thread_info)
+        free_thread_pname = thread_info->process_name;
+    }
+    qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
 
     qemu_log("\tchunk at %#018lx, size: %ld\n", allocated_info->asan_chunk_start, allocated_info->request_size);
-    qemu_log("\tallocated by thread %d (%s) at %#018lx\n", allocated_info->pid, thread_pname, allocated_info->allocated_at);
+    qemu_log("\tallocated by thread %d (%s) at %#018lx\n", allocated_info->pid, alloc_thread_pname, allocated_info->allocated_at);
+    if (!ctx->find_in_use)
+        qemu_log("\tfree by thread %d (%s) at %#018lx\n", allocated_info->free_pid, free_thread_pname, allocated_info->free_at);
 }
 
 static void print_allocated_info(vaddr addr, bool find_in_use)
@@ -860,10 +876,15 @@ int asan_giovese_report_and_crash(int access_type, vaddr addr, size_t n,
     qemu_log("\tcpu %d pid: %d (%s)\n", current_cpu->cpu_index, pid, thread_pname);
     qemu_log("\ttry to %s on address %#018lx, size %ld\n", get_access_type_string(access_type), addr, n);
 
-    if ((access_type == ACCESS_TYPE_DOUBLE_FREE) || !strcmp("heap-use-after-free", error_type))
-        print_allocated_info(addr, false);
-    else
-        print_allocated_info(addr, true);
+    // if ((access_type == ACCESS_TYPE_DOUBLE_FREE) || !strcmp("heap-use-after-free", error_type))
+    //     print_allocated_info(addr, false);
+    // else
+    //     print_allocated_info(addr, true);
+
+    qemu_log("\tfreed chunk info:\n");
+    print_allocated_info(addr, false);
+    qemu_log("\tin used chunk info:\n");
+    print_allocated_info(addr, true);
 
     print_shadow(fault_addr);
     print_crash_stack();

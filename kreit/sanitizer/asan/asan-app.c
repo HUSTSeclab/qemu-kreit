@@ -410,6 +410,8 @@ static void asan_trace_linux_free(KreitAsanState *appdata, CPUArchState* env, Kr
     if (allocated_info->in_use) {
         asan_poison_region(free_addr, allocated_info->chunk_size, ASAN_HEAP_FREED);
         allocated_info->in_use = false;
+        allocated_info->free_at = kreit_get_pc(env) - 5;
+        allocated_info->free_pid = pid;
     } else {
         asan_giovese_report_and_crash(ACCESS_TYPE_DOUBLE_FREE,
             allocated_info->asan_chunk_start,
