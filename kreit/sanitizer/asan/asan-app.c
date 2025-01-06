@@ -629,6 +629,64 @@ static void app_asan_trace_whitelist_finished(KreitAsanState *appdata,
     thread_info->asan_enabled = pending_hook->staged_asan_state;
 }
 
+static void app_asan_trace_prep_compound_page(KreitAsanState *appdata,
+    CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+
+    vaddr page;
+    unsigned int order;
+
+    // disable kasan before returning
+    pending_hook->staged_asan_state = thread_info->asan_enabled;
+    thread_info->asan_enabled = false;
+
+    page = kreit_get_abi_param(env, 1);
+    order = kreit_get_abi_param(env, 2);
+
+    if (kreitapp_get_verbose(OBJECT(appdata)) >= 1)
+        qemu_log("prep_compound_page at %#018lx, order: %d\n", page, order);
+
+    if (page >= appdata->alloc_range_start && page <= appdata->alloc_range_end)
+        asan_unpoison_region(page, 4096 * 1 << order);
+}
+
+static void app_asan_trace_prep_compound_page_finished(KreitAsanState *appdata,
+    CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+
+    // restore the asan state
+    thread_info->asan_enabled = pending_hook->staged_asan_state;
+}
+
+static void app_asan_trace_clear_page_rep(KreitAsanState *appdata,
+    CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+    vaddr page;
+
+    // disable kasan before returning
+    pending_hook->staged_asan_state = thread_info->asan_enabled;
+    thread_info->asan_enabled = false;
+
+    page = kreit_get_abi_param(env, 1);
+
+    if (kreitapp_get_verbose(OBJECT(appdata)) >= 1)
+        qemu_log("clear_page_rep at %#018lx\n", page);
+
+    asan_unpoison_region(page, 4096);
+}
+
+static void app_asan_trace_clear_page_rep_finished(KreitAsanState *appdata,
+    CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+
+    // restore the asan state
+    thread_info->asan_enabled = pending_hook->staged_asan_state;
+}
+
 static void app_asan_trace_hook(void *instr_data, void *userdata)
 {
     KreitAsanHookData *hook_data = instr_data;
@@ -695,7 +753,13 @@ static void app_asan_trace_hook(void *instr_data, void *userdata)
             pending_hook->trace_finished = app_asan_trace_whitelist_finished;
             break;
         case ASAN_HOOK_PREP_COMPOUND_PAGE:
+            pending_hook->trace_start = app_asan_trace_prep_compound_page;
+            pending_hook->trace_finished = app_asan_trace_prep_compound_page_finished;
+            break;
         case ASAN_HOOK_CLEAR_PAGE_REP:
+            pending_hook->trace_start = app_asan_trace_clear_page_rep;
+            pending_hook->trace_finished = app_asan_trace_clear_page_rep_finished;
+            break;
         case ASAN_HOOK_HANDLE_MM_PAGE_FAULT:
             break;
         case ASAN_HOOK_QNX_SREALLOC:
