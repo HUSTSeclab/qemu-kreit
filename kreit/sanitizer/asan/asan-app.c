@@ -84,20 +84,27 @@ static void asan_trace_linux_size_in_regs(KreitAsanState *appdata,
     }
 
     allocated_info = g_malloc0(sizeof(AsanAllocatedInfo));
-    allocated_info->chunk_size =
-        asan_allocator_aligned_size(request_size + REDZONE_SIZE);
-    g_assert(allocated_info->chunk_size);
-    allocated_info->redzone_size =
-        allocated_info->chunk_size - ROUND_UP(request_size, 8);
-    allocated_info->request_size = request_size;
     allocated_info->pid = pid;
     allocated_info->allocated_at =
         kreit_cpu_ldq(env_cpu(env), kreit_get_stack_ptr(env)) - 5;
+    if (request_size + REDZONE_SIZE <= 2097152) {
+        allocated_info->chunk_size =
+            asan_allocator_aligned_size(request_size + REDZONE_SIZE);
+        g_assert(allocated_info->chunk_size);
+        allocated_info->redzone_size =
+            allocated_info->chunk_size - ROUND_UP(request_size, 8);
+        allocated_info->request_size = request_size;
 
-    // request a larger chunk
-    kreit_set_abi_reg_param(env,
-        pending_hook->hook_info->param_order,
-        allocated_info->chunk_size);
+        // request a larger chunk
+        kreit_set_abi_reg_param(env,
+            pending_hook->hook_info->param_order,
+            allocated_info->chunk_size);
+    } else {
+        allocated_info->chunk_size = request_size;
+        g_assert(allocated_info->chunk_size);
+        allocated_info->redzone_size = 0;
+        allocated_info->request_size = request_size;
+    }
 
     // store the unmature allocated_info
     pending_hook->allocated_info = allocated_info;
