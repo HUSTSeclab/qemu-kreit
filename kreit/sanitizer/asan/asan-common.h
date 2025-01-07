@@ -10,6 +10,7 @@
 typedef enum AsanHookType {
     ASAN_HOOK_TYPE_INVALID,
     ASAN_HOOK_ALLOC_KMEM_CACHE,
+    ASAN_HOOK_KMEM_CACHE_CREATE,
     ASAN_HOOK_ALLOC_SIZE_IN_REGS,
     ASAN_HOOK_ALLOC_BULK,
     ASAN_HOOK_KSIZE,
@@ -54,16 +55,6 @@ typedef struct AsanThreadInfo {
     char process_name[PROCESS_NAME_LENGTH];
 
     // context info
-
-    // for kmem_cache_alloc
-    bool in_kmem_cache_alloc;
-    bool need_retry_alloc;
-    vaddr last_allocated_addr;
-    vaddr last_last_allocated_addr;
-    int alloc_count;
-    AsanAllocatedInfo *kmem_cache_allocated_info;
-    void *storaged_regs;
-    size_t align_size;
 } AsanThreadInfo;
 
 typedef struct KreitPendingHook {

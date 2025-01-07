@@ -154,72 +154,31 @@ static void asan_trace_linux_kmem_cache_alloc(KreitAsanState *appdata,
     size_t align_size;
     AsanThreadInfo *thread_info = pending_hook->thread_info;
     AsanAllocatedInfo *allocated_info;
-    vaddr stack_ptr;
-    KreitPendingHook *new_pending_hook;
 
     // disable kasan before returning
     pending_hook->staged_asan_state = thread_info->asan_enabled;
     thread_info->asan_enabled = false;
 
-    if (!thread_info->in_kmem_cache_alloc) {
-        request_size = get_linux_alloc_size(appdata, env, pending_hook->hook_info);
-        align_size = get_linux_cache_align(appdata, env);
+    request_size = get_linux_alloc_size(appdata, env, pending_hook->hook_info);
+    align_size = get_linux_cache_align(appdata, env);
 
-        if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
-            qemu_log("qkasan: cpu %d pid %d cpl %d: alloc (type: kmem_cache) size: %ld, align: %ld, ret addr: %#018lx, rsp: %#018lx\n",
-                current_cpu->cpu_index, pid, get_cpu_privilege(env),
-                request_size, align_size,
-                pending_hook->ret_addr, pending_hook->stack_ptr);
-        }
-
-        thread_info->in_kmem_cache_alloc = true;
-        thread_info->need_retry_alloc = true;
-        thread_info->last_allocated_addr = 0;
-        thread_info->last_last_allocated_addr = 0;
-        thread_info->alloc_count = 0;
-        thread_info->storaged_regs = kreit_get_regular_register_buf(env);
-        thread_info->align_size = align_size;
-
-        allocated_info = g_malloc0(sizeof(AsanAllocatedInfo));
-        allocated_info->chunk_size = 2 * request_size;
-        allocated_info->redzone_size = request_size;
-        allocated_info->pid = pid;
-        allocated_info->request_size = request_size;
-        allocated_info->allocated_at =
-            kreit_cpu_ldq(env_cpu(env), kreit_get_stack_ptr(env)) - 5;
-        // store the unmature allocated_info
-        thread_info->kmem_cache_allocated_info = allocated_info;
+    if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
+        qemu_log("qkasan: cpu %d pid %d cpl %d: alloc (type: kmem_cache) size: %ld, align: %ld, ret addr: %#018lx, rsp: %#018lx\n",
+            current_cpu->cpu_index, pid, get_cpu_privilege(env),
+            request_size, align_size,
+            pending_hook->ret_addr, pending_hook->stack_ptr);
     }
 
-    kreit_set_regular_register_buf(env, thread_info->storaged_regs);
-    if (thread_info->need_retry_alloc) {
-        // prepare the next kmem_cache_alloc
-        // rsp = rsp - 8
-        stack_ptr = kreit_get_stack_ptr(env);
-        stack_ptr = stack_ptr - 8;
-        kreit_set_stack_ptr(env, stack_ptr);
-        // [rsp] = address of kmem_cache
-        kreit_cpu_stq(env_cpu(env), stack_ptr, kreit_get_pc(env));
+    allocated_info = g_malloc0(sizeof(AsanAllocatedInfo));
+    allocated_info->pid = pid;
+    allocated_info->allocated_at =
+        kreit_cpu_ldq(env_cpu(env), kreit_get_stack_ptr(env)) - 5;
+    allocated_info->chunk_size = request_size;
+    allocated_info->redzone_size = 0;
+    allocated_info->request_size = request_size;
 
-        // modify the pending hook info
-        qemu_spin_lock(&appdata->pending_hooks_lock);
-        new_pending_hook = g_malloc0(sizeof(KreitPendingHook));
-        *new_pending_hook = *pending_hook;
-        g_hash_table_remove(appdata->pending_hooks,
-            pending_hook_hash_key(pending_hook->ret_addr, pending_hook->stack_ptr));
-        new_pending_hook->ret_addr = kreit_get_pc(env);
-        new_pending_hook->stack_ptr = stack_ptr;
-        g_hash_table_insert(appdata->pending_hooks,
-            pending_hook_hash_key(new_pending_hook->ret_addr, new_pending_hook->stack_ptr),
-            new_pending_hook);
-        qemu_spin_unlock(&appdata->pending_hooks_lock);
-
-        if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
-            qemu_log("\ttrying kmem_cache_alloc, pending ret addr %#018lx, stack ptr %#018lx\n",
-                new_pending_hook->ret_addr,
-                new_pending_hook->stack_ptr);
-        }
-    }
+    // store the unmature allocated_info
+    pending_hook->allocated_info = allocated_info;
 }
 
 static void asan_trace_linux_kmem_cache_alloc_finished(KreitAsanState *appdata,
@@ -227,79 +186,29 @@ static void asan_trace_linux_kmem_cache_alloc_finished(KreitAsanState *appdata,
 {
     int pid = *curr_cpu_data(current_pid);
     AsanThreadInfo *thread_info = pending_hook->thread_info;
-    AsanAllocatedInfo *allocated_info = thread_info->kmem_cache_allocated_info;
-    vaddr alloc_ret_val;
-    size_t asan_aligned_size;
-    bool alloc_end = false;
-    bool exceed_max_retry = false;
+    AsanAllocatedInfo *allocated_info = pending_hook->allocated_info;
 
     // restore the asan state
     thread_info->asan_enabled = pending_hook->staged_asan_state;
 
-    alloc_ret_val = kreit_get_return_value(env);
+    allocated_info->asan_chunk_start = kreit_get_return_value(env);
+    allocated_info->in_use = true;
 
     if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
         qemu_log("qkasan: cpu %d pid %d cpl %d: alloc (type: kmem_cache) finished, return value: %#018lx, current eip: %#018lx, rsp - 8: %#018lx\n",
             current_cpu->cpu_index, pid, get_cpu_privilege(env),
-            alloc_ret_val,
+            allocated_info->asan_chunk_start,
             kreit_get_pc(env),
             kreit_get_stack_ptr(env) - 8);
     }
 
-    if (!thread_info->need_retry_alloc) {
-        // final return to normal execution
-        kreit_set_return_value(env, allocated_info->asan_chunk_start);
-        thread_info->in_kmem_cache_alloc = false;
-        g_free(thread_info->storaged_regs);
-        thread_info->storaged_regs = NULL;
-        return;
-    }
-
-    asan_aligned_size = ROUND_UP(allocated_info->request_size, thread_info->align_size);
-    if (alloc_ret_val - thread_info->last_allocated_addr == asan_aligned_size)
-        alloc_end = true;
-    if (alloc_ret_val - thread_info->last_allocated_addr ==
-        thread_info->last_allocated_addr - thread_info->last_last_allocated_addr)
-        alloc_end = true;
-    if (alloc_ret_val < thread_info->last_allocated_addr)
-        alloc_end = false;
-
-    thread_info->alloc_count++;
-    if (thread_info->alloc_count > 10) {
-        alloc_end = true;
-        exceed_max_retry = true;
-    }
-
-    if (alloc_end && !exceed_max_retry) {
-        thread_info->need_retry_alloc = false;
-        allocated_info->asan_chunk_start = thread_info->last_allocated_addr;
-        allocated_info->in_use = true;
-
-        asan_unpoison_region(allocated_info->asan_chunk_start,
-            allocated_info->chunk_size);
-        asan_poison_region(alloc_ret_val, allocated_info->redzone_size, ASAN_HEAP_RIGHT_RZ);
-        qemu_spin_lock(&appdata->asan_allocated_info_lock);
-        g_hash_table_insert(appdata->asan_allocated_info,
-            (gpointer) allocated_info->asan_chunk_start,
-            allocated_info);
-        qemu_spin_unlock(&appdata->asan_allocated_info_lock);
-    } else if (alloc_end && exceed_max_retry) {
-        thread_info->need_retry_alloc = false;
-        allocated_info->asan_chunk_start = thread_info->last_allocated_addr;
-        allocated_info->in_use = true;
-
-        allocated_info->chunk_size = allocated_info->chunk_size >> 1;
-        asan_unpoison_region(allocated_info->asan_chunk_start,
-            allocated_info->chunk_size);
-        qemu_spin_lock(&appdata->asan_allocated_info_lock);
-        g_hash_table_insert(appdata->asan_allocated_info,
-            (gpointer) allocated_info->asan_chunk_start,
-            allocated_info);
-        qemu_spin_unlock(&appdata->asan_allocated_info_lock);
-    } else {
-        thread_info->last_last_allocated_addr = thread_info->last_allocated_addr;
-        thread_info->last_allocated_addr = alloc_ret_val;
-    }
+    asan_unpoison_region(allocated_info->asan_chunk_start,
+        allocated_info->chunk_size);
+    qemu_spin_lock(&appdata->asan_allocated_info_lock);
+    g_hash_table_insert(appdata->asan_allocated_info,
+        (gpointer) allocated_info->asan_chunk_start,
+        allocated_info);
+    qemu_spin_unlock(&appdata->asan_allocated_info_lock);
 }
 
 static void asan_trace_linux_bulk_alloc(KreitAsanState *appdata,
@@ -754,6 +663,8 @@ static void app_asan_trace_hook(void *instr_data, void *userdata)
             pending_hook->trace_start = asan_trace_linux_kmem_cache_alloc;
             pending_hook->trace_finished = asan_trace_linux_kmem_cache_alloc_finished;
             break;
+        case ASAN_HOOK_KMEM_CACHE_CREATE:
+            break;
         case ASAN_HOOK_ALLOC_BULK:
             pending_hook->trace_start = asan_trace_linux_bulk_alloc;
             pending_hook->trace_finished = asan_trace_linux_bulk_alloc_finished;
@@ -942,6 +853,8 @@ static void get_asan_kernel_info(KreitAsanState *kas)
         const char *hook_type = qdict_get_str(entry_dict, "type");
         if (strcmp(hook_type, "kmem_cache") == 0) {
             kas->asan_hook[i].type = ASAN_HOOK_ALLOC_KMEM_CACHE;
+        } else if (strcmp(hook_type, "kmem_cache_create") == 0) {
+            kas->asan_hook[i].type = ASAN_HOOK_KMEM_CACHE_CREATE;
         } else if (strcmp(hook_type, "size-in-regs") == 0) {
             kas->asan_hook[i].type = ASAN_HOOK_ALLOC_SIZE_IN_REGS;
         } else if (strcmp(hook_type, "alloc_bulk") == 0) {
