@@ -353,9 +353,13 @@ static void asan_trace_linux_free(KreitAsanState *appdata, CPUArchState* env, Kr
         allocated_info->free_at = kreit_get_pc(env) - 5;
         allocated_info->free_pid = pid;
     } else {
-        asan_giovese_report_and_crash(ACCESS_TYPE_DOUBLE_FREE,
-            allocated_info->data_start,
-            1, env);
+        if (asan_giovese_load1(allocated_info->data_start)) {
+            // Some chunk may be unpoison by clear_page but still marked
+            // as not in use.
+            asan_giovese_report_and_crash(ACCESS_TYPE_DOUBLE_FREE,
+                allocated_info->data_start,
+                1, env);
+        }
     }
 }
 

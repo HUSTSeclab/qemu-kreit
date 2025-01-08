@@ -891,6 +891,7 @@ int asan_giovese_report_and_crash(int access_type, vaddr addr, size_t n,
 
     print_all_cpu_state();
 
+    // trigger_cpu_crash_by_ud(env_cpu(env));
     g_assert(0);
     return -1;
 }
