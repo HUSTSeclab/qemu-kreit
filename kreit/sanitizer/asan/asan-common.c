@@ -750,8 +750,8 @@ static void gfunc_print_allocated_chunk(gpointer _not_used, gpointer _allocated_
     // if (ctx->search_res)
     //     return;
 
-    if (!(addr >= allocated_info->asan_chunk_start &&
-        addr < allocated_info->asan_chunk_start + allocated_info->chunk_size)) {
+    if (!(addr >= allocated_info->data_start &&
+        addr < allocated_info->data_start + allocated_info->chunk_size)) {
 
         return;
     }
@@ -770,7 +770,7 @@ static void gfunc_print_allocated_chunk(gpointer _not_used, gpointer _allocated_
     }
     qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
 
-    qemu_log("\tchunk at %#018lx, size: %ld\n", allocated_info->asan_chunk_start, allocated_info->request_size);
+    qemu_log("\tchunk at %#018lx, size: %ld\n", allocated_info->data_start, allocated_info->request_size);
     qemu_log("\tallocated by thread %d (%s) at %#018lx\n", allocated_info->pid, alloc_thread_pname, allocated_info->allocated_at);
     if (!ctx->find_in_use)
         qemu_log("\tfree by thread %d (%s) at %#018lx\n", allocated_info->free_pid, free_thread_pname, allocated_info->free_at);

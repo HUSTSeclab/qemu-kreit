@@ -35,7 +35,7 @@ typedef struct AsanAllocatedInfo {
 
     // AsanHookType hook_type;
     int pid;
-    vaddr asan_chunk_start;
+    vaddr data_start;
     size_t request_size;
     size_t chunk_size;
     size_t redzone_size;
