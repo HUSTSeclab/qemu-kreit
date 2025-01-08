@@ -69,7 +69,7 @@ static void insert_allocated_info(AsanAllocatedInfo *allocated_info)
 
     res = g_hash_table_lookup(asan_state->asan_allocated_info, (gpointer) chunk);
     if (res && res->in_use) {
-        if (kreitapp_get_verbose(OBJECT(asan_state)))
+        if (kreitapp_get_verbose(OBJECT(asan_state)) >= 1)
             qemu_log("warn: insert existing in use chunk %#018lx\n", chunk);
         g_hash_table_remove(asan_state->asan_allocated_info, (gpointer) chunk);
     }
