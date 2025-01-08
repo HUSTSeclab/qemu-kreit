@@ -350,7 +350,7 @@ static void asan_trace_linux_free(KreitAsanState *appdata, CPUArchState* env, Kr
     if (allocated_info->in_use) {
         asan_poison_region(free_addr, allocated_info->chunk_size, ASAN_HEAP_FREED);
         allocated_info->in_use = false;
-        allocated_info->free_at = kreit_get_pc(env) - 5;
+        allocated_info->free_at = kreit_cpu_ldq(env_cpu(env), kreit_get_stack_ptr(env)) - 5;
         allocated_info->free_pid = pid;
     } else {
         if (asan_giovese_load1(allocated_info->data_start)) {
