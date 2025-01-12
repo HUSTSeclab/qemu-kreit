@@ -45,6 +45,13 @@ typedef struct AsanAllocatedInfo {
     int free_pid;
 } AsanAllocatedInfo;
 
+typedef struct AsanCacheInfo {
+    vaddr cache_addr;
+    size_t request_size;
+    size_t size;
+    size_t redzone_size;
+} AsanCacheInfo;
+
 typedef struct KreitAsanState KreitAsanState;
 typedef struct AsanThreadInfo AsanThreadInfo;
 typedef struct KreitPendingHook KreitPendingHook;
@@ -71,7 +78,9 @@ typedef struct KreitPendingHook {
     void (*trace_start)(KreitAsanState *appdata, CPUArchState *env, KreitPendingHook *thread_info);
     void (*trace_finished)(KreitAsanState *appdata, CPUArchState *env, KreitPendingHook *thread_info);
 
+    // store the unmature info
     AsanAllocatedInfo *allocated_info;
+    AsanCacheInfo *cache_info;
 
     // ksize info
     vaddr ksize_ptr;
@@ -103,6 +112,9 @@ typedef struct KreitAsanState {
 
     QemuSpin asan_allocated_info_lock;
     GHashTable *asan_allocated_info;
+
+    QemuSpin asan_kmem_cache_lock;
+    GHashTable *asan_kmem_cache;
 
     vaddr alloc_range_start;
     vaddr alloc_range_end;

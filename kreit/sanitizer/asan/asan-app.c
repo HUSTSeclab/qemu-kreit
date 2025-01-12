@@ -101,7 +101,10 @@ static void asan_trace_linux_size_in_regs(KreitAsanState *appdata,
     allocated_info->pid = pid;
     allocated_info->allocated_at =
         kreit_cpu_ldq(env_cpu(env), kreit_get_stack_ptr(env)) - 5;
+
     if (request_size + REDZONE_SIZE <= 2097152) {
+        // The max cache size of __kmalloc is 2097152
+        // So do not add redzone while request size is too large
         allocated_info->chunk_size =
             asan_allocator_aligned_size(request_size + REDZONE_SIZE);
         g_assert(allocated_info->chunk_size);
@@ -158,21 +161,89 @@ static void asan_trace_linux_size_in_regs_finished(KreitAsanState *appdata,
     qemu_spin_unlock(&appdata->asan_allocated_info_lock);
 }
 
+static void asan_trace_linux_kmem_cache_create(KreitAsanState *appdata,
+    CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    int pid = *curr_cpu_data(current_pid);
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+    unsigned int request_size;
+    unsigned int new_size;
+    unsigned int align;
+    AsanCacheInfo *cache_info;
+
+    // disable kasan before returning
+    pending_hook->staged_asan_state = thread_info->asan_enabled;
+    thread_info->asan_enabled = false;
+
+    request_size = (unsigned int) kreit_get_abi_param(env, 2);
+    align = (unsigned int) kreit_get_abi_param(env, 3);
+
+    if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
+        qemu_log("qkasan: cpu %d pid %d cpl %d: kmem_cache_create with size: %d, align: %d\n",
+            current_cpu->cpu_index, pid, get_cpu_privilege(env),
+            request_size, align);
+    }
+
+    cache_info = g_malloc0(sizeof(AsanCacheInfo));
+    cache_info->request_size = request_size;
+    // Reset the cache size with redzone
+    if (align == 0)
+        align = 8;
+    new_size = ROUND_UP(request_size, align) * 2;
+    cache_info->redzone_size = ROUND_UP(request_size, align);
+    pending_hook->cache_info = cache_info;
+
+    // qemu_log("new request size %d\n", new_size);
+    kreit_set_abi_reg_param(env, 2, (uint64_t) new_size);
+}
+
+static void asan_trace_linux_kmem_cache_create_finished(KreitAsanState *appdata,
+    CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    int pid = *curr_cpu_data(current_pid);
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+    AsanCacheInfo *cache_info;
+
+    // restore the asan state
+    thread_info->asan_enabled = pending_hook->staged_asan_state;
+
+    cache_info = pending_hook->cache_info;
+    cache_info->cache_addr = kreit_get_return_value(env);
+
+    cache_info->size = kreit_cpu_ldl(env_cpu(env), cache_info->cache_addr + appdata->size_offset);
+
+    if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
+        qemu_log("qkasan: cpu %d pid %d cpl %d: kmem_cache_create finished, return value: %#018lx, cache size: %ld\n",
+            current_cpu->cpu_index, pid, get_cpu_privilege(env),
+            cache_info->cache_addr, cache_info->size);
+    }
+
+    qemu_spin_lock(&appdata->asan_kmem_cache_lock);
+    g_hash_table_insert(appdata->asan_kmem_cache, (gpointer) cache_info->cache_addr, cache_info);
+    qemu_spin_unlock(&appdata->asan_kmem_cache_lock);
+}
+
 static void asan_trace_linux_kmem_cache_alloc(KreitAsanState *appdata,
     CPUArchState* env, KreitPendingHook *pending_hook)
 {
     int pid = *curr_cpu_data(current_pid);
     size_t request_size;
     size_t align_size;
+    vaddr cache_addr;
     AsanThreadInfo *thread_info = pending_hook->thread_info;
     AsanAllocatedInfo *allocated_info;
+    AsanCacheInfo *cache_info;
 
     // disable kasan before returning
     pending_hook->staged_asan_state = thread_info->asan_enabled;
     thread_info->asan_enabled = false;
 
+    // if (!pending_hook->staged_asan_state)
+    //     return;
+
     request_size = get_linux_alloc_size(appdata, env, pending_hook->hook_info);
     align_size = get_linux_cache_align(appdata, env);
+    cache_addr = kreit_get_abi_param(env, 1);
 
     if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
         qemu_log("qkasan: cpu %d pid %d cpl %d: alloc (type: kmem_cache) size: %ld, align: %ld, ret addr: %#018lx, rsp: %#018lx\n",
@@ -181,13 +252,25 @@ static void asan_trace_linux_kmem_cache_alloc(KreitAsanState *appdata,
             pending_hook->ret_addr, pending_hook->stack_ptr);
     }
 
+    qemu_spin_lock(&appdata->asan_kmem_cache_lock);
+    cache_info = g_hash_table_lookup(appdata->asan_kmem_cache, (gpointer) cache_addr);
+    qemu_spin_unlock(&appdata->asan_kmem_cache_lock);
+
     allocated_info = g_malloc0(sizeof(AsanAllocatedInfo));
     allocated_info->pid = pid;
     allocated_info->allocated_at =
         kreit_cpu_ldq(env_cpu(env), kreit_get_stack_ptr(env)) - 5;
-    allocated_info->chunk_size = request_size;
-    allocated_info->redzone_size = 0;
-    allocated_info->request_size = request_size;
+
+    if (cache_info) {
+        allocated_info->chunk_size = cache_info->size;
+        allocated_info->request_size = cache_info->request_size;
+        allocated_info->redzone_size = cache_info->redzone_size;
+    } else {
+        // qemu_log("qkasan: warning: cannot find cache_info!\n");
+        allocated_info->chunk_size = request_size;
+        allocated_info->redzone_size = 0;
+        allocated_info->request_size = request_size;
+    }
 
     // store the unmature allocated_info
     pending_hook->allocated_info = allocated_info;
@@ -199,6 +282,10 @@ static void asan_trace_linux_kmem_cache_alloc_finished(KreitAsanState *appdata,
     int pid = *curr_cpu_data(current_pid);
     AsanThreadInfo *thread_info = pending_hook->thread_info;
     AsanAllocatedInfo *allocated_info = pending_hook->allocated_info;
+    vaddr redzone_start;
+
+    // if (!pending_hook->staged_asan_state)
+    //     return;
 
     // restore the asan state
     thread_info->asan_enabled = pending_hook->staged_asan_state;
@@ -216,6 +303,11 @@ static void asan_trace_linux_kmem_cache_alloc_finished(KreitAsanState *appdata,
 
     asan_unpoison_region(allocated_info->data_start,
         allocated_info->chunk_size);
+    redzone_start = allocated_info->data_start +
+        allocated_info->chunk_size - allocated_info->redzone_size;
+    asan_poison_region(redzone_start,
+        allocated_info->redzone_size, ASAN_HEAP_RIGHT_RZ);
+
     qemu_spin_lock(&appdata->asan_allocated_info_lock);
     insert_allocated_info(allocated_info);
     qemu_spin_unlock(&appdata->asan_allocated_info_lock);
@@ -338,6 +430,7 @@ static void asan_trace_linux_free(KreitAsanState *appdata, CPUArchState* env, Kr
             current_cpu->cpu_index, pid, get_cpu_privilege(env),
             free_addr,
             pending_hook->ret_addr, pending_hook->stack_ptr);
+        qemu_log("Current eip: %#018lx, param_order: %d\n", env->eip, param_order);
     }
 
     qemu_spin_lock(&appdata->asan_allocated_info_lock);
@@ -671,11 +764,13 @@ static void app_asan_trace_hook(void *instr_data, void *userdata)
             pending_hook->trace_start = asan_trace_linux_size_in_regs;
             pending_hook->trace_finished = asan_trace_linux_size_in_regs_finished;
             break;
+        case ASAN_HOOK_KMEM_CACHE_CREATE:
+            pending_hook->trace_start = asan_trace_linux_kmem_cache_create;
+            pending_hook->trace_finished = asan_trace_linux_kmem_cache_create_finished;
+            break;
         case ASAN_HOOK_ALLOC_KMEM_CACHE:
             pending_hook->trace_start = asan_trace_linux_kmem_cache_alloc;
             pending_hook->trace_finished = asan_trace_linux_kmem_cache_alloc_finished;
-            break;
-        case ASAN_HOOK_KMEM_CACHE_CREATE:
             break;
         case ASAN_HOOK_ALLOC_BULK:
             pending_hook->trace_start = asan_trace_linux_bulk_alloc;
@@ -826,6 +921,7 @@ static int asan_app_init_userdata(Object *obj)
     }
 
     kas->asan_allocated_info = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
+    kas->asan_kmem_cache = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
     kas->pending_hooks = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
     kas->nr_pending_hooks = 0;
     return 0;
@@ -926,6 +1022,7 @@ static void kreit_asan_instance_init(Object *obj)
 
     qemu_spin_init(&kas->asan_threadinfo_lock);
     qemu_spin_init(&kas->asan_allocated_info_lock);
+    qemu_spin_init(&kas->asan_kmem_cache_lock);
     qemu_spin_init(&kas->pending_hooks_lock);
     // TODO: better shadow memory allocator
     kas->shadow_base = mmap(NULL, kcont.mem_size >> 3, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
