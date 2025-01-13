@@ -736,6 +736,22 @@ struct allocated_info_search_context {
     bool find_in_use;
 };
 
+static void print_stack(uint64_t *stack, int stack_len)
+{
+    int nr_line = stack_len >> 2;
+
+    for (int i = 0; i < nr_line; i++) {
+        // line
+        qemu_log("%04x: ", 0x20 * i);
+        for (int j = 0; j < 4; j++) {
+            // column
+            qemu_log("%016lx ", stack[4 * i + j]);
+        }
+        qemu_log("\n");
+    }
+    qemu_log("\n");
+}
+
 static void gfunc_print_allocated_chunk(gpointer _not_used, gpointer _allocated_info, gpointer _userdata)
 {
     AsanAllocatedInfo *allocated_info = _allocated_info;
@@ -772,6 +788,8 @@ static void gfunc_print_allocated_chunk(gpointer _not_used, gpointer _allocated_
 
     qemu_log("\tchunk at %#018lx, size: %ld\n", allocated_info->data_start, allocated_info->request_size);
     qemu_log("\tallocated by thread %d (%s) at %#018lx\n", allocated_info->pid, alloc_thread_pname, allocated_info->allocated_at);
+    qemu_log("\tstack state when chunk allocated:\n");
+    print_stack(allocated_info->stack_record, asan_state->stack_record_len);
     if (!ctx->find_in_use)
         qemu_log("\tfree by thread %d (%s) at %#018lx\n", allocated_info->free_pid, free_thread_pname, allocated_info->free_at);
 }
@@ -813,6 +831,7 @@ static void print_crash_stack(void)
     CPUState *cpu;
     CPUArchState *env;
     vaddr sp;
+    uint64_t *stack = g_malloc0(sizeof(uint64_t) * asan_state->stack_record_len);
 
     qemu_log("\n----------------- CRASH STACK -----------------\n\n");
 
@@ -822,16 +841,9 @@ static void print_crash_stack(void)
 
         print_cpu_basic_info(cpu->cpu_index);
 
-        for (int i = 0; i < 8; i++) {
-            // line
-            qemu_log("%04x: ", 0x20 * i);
-            for (int j = 0; j < 4; j++) {
-                // column
-                qemu_log("%016lx ", kreit_cpu_ldq(cpu, sp + 0x20 * i + 8 * j));
-            }
-            qemu_log("\n");
-        }
-        qemu_log("\n");
+        for (int i = 0; i < asan_state->stack_record_len; i++)
+            stack[i] = kreit_cpu_ldq(cpu, sp + i * 8);
+        print_stack(stack, asan_state->stack_record_len);
     }
 }
 

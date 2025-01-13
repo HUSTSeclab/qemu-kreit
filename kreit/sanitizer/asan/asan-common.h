@@ -43,6 +43,7 @@ typedef struct AsanAllocatedInfo {
 
     vaddr free_at;
     int free_pid;
+    uint64_t *stack_record;
 } AsanAllocatedInfo;
 
 typedef struct AsanCacheInfo {
@@ -99,6 +100,9 @@ typedef struct KreitAsanState {
     KreitAppState parent_obj;
 
     /*< public >*/
+    // config
+    int stack_record_len;
+
     KreitAsanInstrInfo *asan_hook;
     size_t nr_asan_hook;
     size_t size_offset;

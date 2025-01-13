@@ -3,6 +3,7 @@
 #include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qlist.h"
 #include "qapi/qmp/qstring.h"
+#include "qapi/visitor.h"
 #include "qemu/log.h"
 #include "kreit_target.h"
 #include "qemu/thread.h"
@@ -17,6 +18,35 @@
 
 DECLARE_INSTANCE_CHECKER(KreitAsanState, KREIT_ASAN_STATE,
                          TYPE_KREIT_ASAN)
+
+static inline AsanAllocatedInfo *alloc_asan_allocated_info(void)
+{
+    AsanAllocatedInfo *ret = g_malloc0(sizeof(AsanAllocatedInfo));
+    ret->stack_record = g_malloc(sizeof(uint64_t) * asan_state->stack_record_len);
+    return ret;
+}
+
+static inline void free_asan_allocated_info(AsanAllocatedInfo *info)
+{
+    g_free(info->stack_record);
+    g_free(info);
+}
+
+static void g_free_asan_allocated_info(gpointer ptr)
+{
+    AsanAllocatedInfo *info = ptr;
+    free_asan_allocated_info(info);
+}
+
+static void copy_stack_to_allocated_info(CPUArchState *env, AsanAllocatedInfo *info)
+{
+    CPUState *cpu = env_cpu(env);
+    vaddr rsp = kreit_get_stack_ptr(env);
+
+    for (int i = 0; i < asan_state->stack_record_len; i++) {
+        info->stack_record[i] = kreit_cpu_ldq(cpu, rsp + 8 * i);
+    }
+}
 
 static inline gpointer pending_hook_hash_key(vaddr ret_addr, vaddr stack_ptr)
 {
@@ -97,10 +127,11 @@ static void asan_trace_linux_size_in_regs(KreitAsanState *appdata,
             pending_hook->ret_addr, pending_hook->stack_ptr);
     }
 
-    allocated_info = g_malloc0(sizeof(AsanAllocatedInfo));
+    allocated_info = alloc_asan_allocated_info();
     allocated_info->pid = pid;
     allocated_info->allocated_at =
         kreit_cpu_ldq(env_cpu(env), kreit_get_stack_ptr(env)) - 5;
+    copy_stack_to_allocated_info(env, allocated_info);
 
     if (request_size + REDZONE_SIZE <= 2097152) {
         // The max cache size of __kmalloc is 2097152
@@ -256,10 +287,11 @@ static void asan_trace_linux_kmem_cache_alloc(KreitAsanState *appdata,
     cache_info = g_hash_table_lookup(appdata->asan_kmem_cache, (gpointer) cache_addr);
     qemu_spin_unlock(&appdata->asan_kmem_cache_lock);
 
-    allocated_info = g_malloc0(sizeof(AsanAllocatedInfo));
+    allocated_info = alloc_asan_allocated_info();
     allocated_info->pid = pid;
     allocated_info->allocated_at =
         kreit_cpu_ldq(env_cpu(env), kreit_get_stack_ptr(env)) - 5;
+    copy_stack_to_allocated_info(env, allocated_info);
 
     if (cache_info) {
         allocated_info->chunk_size = cache_info->size;
@@ -327,13 +359,15 @@ static void asan_trace_linux_bulk_alloc(KreitAsanState *appdata,
     pending_hook->nr_bulk = kreit_get_abi_param(env, 3);
     pending_hook->bulk_array = kreit_get_abi_param(env, 4);
 
-    allocated_info = g_malloc0(sizeof(AsanAllocatedInfo));
+    allocated_info = alloc_asan_allocated_info();
+
     allocated_info->request_size =
         get_linux_alloc_size(appdata, env, pending_hook->hook_info);
     allocated_info->chunk_size = allocated_info->request_size;
     allocated_info->pid = pid;
     allocated_info->allocated_at =
         kreit_cpu_ldq(env_cpu(env), kreit_get_stack_ptr(env)) - 5;
+    copy_stack_to_allocated_info(env, allocated_info);
 
     if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
         qemu_log("qkasan: cpu %d pid %d cpl %d: alloc (type: bulk_alloc) size: %ld, nr_bulk: %ld, ret addr: %#018lx, rsp: %#018lx\n",
@@ -376,7 +410,8 @@ static void asan_trace_linux_bulk_alloc_finished(KreitAsanState *appdata,
             qemu_log("\tbulk info %d: allocated address: %#018lx\n", i, allocated_addr);
 
         asan_unpoison_region(allocated_addr, common_allocated_info->chunk_size);
-        bulk_allocated_info = g_malloc0(sizeof(AsanAllocatedInfo));
+        bulk_allocated_info = alloc_asan_allocated_info();
+
         bulk_allocated_info->in_use = true;
         *bulk_allocated_info = *common_allocated_info;
         bulk_allocated_info->data_start = allocated_addr;
@@ -574,7 +609,8 @@ static void asan_trace_qnx_srealloc(KreitAsanState *appdata, CPUArchState* env, 
     if (new_size) {
         // do alloc
         // Extent the allocated size and set redzone
-        new_allocated_info = g_malloc0(sizeof(AsanAllocatedInfo));
+        new_allocated_info = alloc_asan_allocated_info();
+
         // new_allocated_info->hook_type = hook->type;
 
         new_allocated_info->request_size = new_size;
@@ -587,6 +623,7 @@ static void asan_trace_qnx_srealloc(KreitAsanState *appdata, CPUArchState* env, 
     if (new_allocated_info) {
         new_allocated_info->pid = pid;
         new_allocated_info->allocated_at = kreit_cpu_ldq(env_cpu(env), kreit_get_stack_ptr(env)) - 5;
+        copy_stack_to_allocated_info(env, new_allocated_info);
     }
 
     pending_hook->allocated_info = new_allocated_info;
@@ -637,7 +674,7 @@ static void asan_trace_qnx_srealloc_finished(KreitAsanState *appdata, CPUArchSta
             qemu_spin_unlock(&appdata->asan_allocated_info_lock);
         } else {
             // qemu_log("\tsrealloc alloc memory failed.\n");
-            g_free(allocated_info);
+            free_asan_allocated_info(allocated_info);
         }
 
         pending_hook->allocated_info = NULL;
@@ -920,7 +957,7 @@ static int asan_app_init_userdata(Object *obj)
         break;
     }
 
-    kas->asan_allocated_info = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
+    kas->asan_allocated_info = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free_asan_allocated_info);
     kas->asan_kmem_cache = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
     kas->pending_hooks = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
     kas->nr_pending_hooks = 0;
@@ -1050,6 +1087,9 @@ static void kreit_asan_instance_init(Object *obj)
     kac->register_instr(obj, KREIT_INSTR_ASAN_HOOK, app_asan_trace_hook);
     kac->register_instr(obj, KREIT_INSTR_TRACE_CONTEXT_SWITCH, app_asan_trace_context_switch);
 
+    // default value
+    kas->stack_record_len = 32;
+
     asan_state = kas;
 }
 
@@ -1061,6 +1101,20 @@ static void kreit_asan_instance_finalize(Object *obj)
     munmap(kas->shadow_base, kcont.mem_size >> 3);
 }
 
+static void kreitapp_set_stack_record_len(Object *obj, Visitor *v,
+                                          const char *name, void *opaque,
+                                          Error **errp)
+{
+    KreitAsanState *kas = KREIT_ASAN_STATE(obj);
+    uint32_t value;
+
+    if (!visit_type_uint32(v, name, &value, errp)) {
+        return;
+    }
+
+    kas->stack_record_len = ROUND_UP(value, 4);
+}
+
 static void kreit_asan_class_init(ObjectClass *klass, void *data)
 {
     KreitAppClass *kac = KREITAPP_CLASS(klass);
@@ -1069,6 +1123,10 @@ static void kreit_asan_class_init(ObjectClass *klass, void *data)
     kac->stop_hook = asan_app_destroy_userdata;
     kreitapp_add_dependency(kac, "tbstart");
     kreitapp_add_dependency(kac, "context-switch");
+
+    object_class_property_add(klass, "stack-record-len", "int",
+        NULL, kreitapp_set_stack_record_len,
+        NULL, NULL);
 }
 
 static const TypeInfo kreit_asan_type = {
