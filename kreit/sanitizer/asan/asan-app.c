@@ -98,8 +98,8 @@ static void insert_allocated_info(AsanAllocatedInfo *allocated_info)
     vaddr chunk = allocated_info->data_start;
 
     res = g_hash_table_lookup(asan_state->asan_allocated_info, (gpointer) chunk);
-    if (res && res->in_use) {
-        if (kreitapp_get_verbose(OBJECT(asan_state)) >= 1)
+    if (res) {
+        if (res->in_use && kreitapp_get_verbose(OBJECT(asan_state)) >= 1)
             qemu_log("warn: insert existing in use chunk %#018lx\n", chunk);
         g_hash_table_remove(asan_state->asan_allocated_info, (gpointer) chunk);
     }
@@ -413,14 +413,17 @@ static void asan_trace_linux_bulk_alloc_finished(KreitAsanState *appdata,
         bulk_allocated_info = alloc_asan_allocated_info();
 
         bulk_allocated_info->in_use = true;
-        *bulk_allocated_info = *common_allocated_info;
+        bulk_allocated_info->request_size = common_allocated_info->request_size;
+        bulk_allocated_info->chunk_size = common_allocated_info->chunk_size;
+        bulk_allocated_info->pid = common_allocated_info->pid;
+        bulk_allocated_info->allocated_at = common_allocated_info->allocated_at;
         bulk_allocated_info->data_start = allocated_addr;
         qemu_spin_lock(&appdata->asan_allocated_info_lock);
         insert_allocated_info(bulk_allocated_info);
         qemu_spin_unlock(&appdata->asan_allocated_info_lock);
     }
 
-    g_free(common_allocated_info);
+    free_asan_allocated_info(common_allocated_info);
 }
 
 static void asan_trace_linux_ksize(KreitAsanState *appdata,
@@ -465,7 +468,6 @@ static void asan_trace_linux_free(KreitAsanState *appdata, CPUArchState* env, Kr
             current_cpu->cpu_index, pid, get_cpu_privilege(env),
             free_addr,
             pending_hook->ret_addr, pending_hook->stack_ptr);
-        qemu_log("Current eip: %#018lx, param_order: %d\n", env->eip, param_order);
     }
 
     qemu_spin_lock(&appdata->asan_allocated_info_lock);
@@ -867,7 +869,7 @@ static void app_asan_trace_tb_start(void *instr_data, void *userdata)
     //     static bool start_trace = false;
     //     if (start_trace)
     //         qemu_log("pc: %#018lx\n", env->eip);
-    //     if (env->eip == 0xffffffff81271290)
+    //     if (strstr(*curr_cpu_data(current_thread_name), "syz-executor"))
     //         start_trace = true;
     // }
 
