@@ -18,6 +18,7 @@ typedef enum AsanHookType {
     ASAN_HOOK_FREE_BULK,
     ASAN_HOOK_WHITELIST,
     ASAN_HOOK_PREP_COMPOUND_PAGE,
+    ASAN_HOOK_POST_ALLOC_HOOK,
     ASAN_HOOK_CLEAR_PAGE_REP,
     ASAN_HOOK_HANDLE_MM_PAGE_FAULT,
     ASAN_HOOK_QNX_SREALLOC,
@@ -147,6 +148,8 @@ static inline bool asan_check_range(vaddr addr)
 {
     return (addr < asan_state->alloc_range_end && addr >= asan_state->alloc_range_start);
 }
+
+bool asan_check_curr_thread_enabled(void);
 
 size_t asan_allocator_aligned_size(size_t size);
 // AsanThreadInfo *asan_get_thread_info(void);

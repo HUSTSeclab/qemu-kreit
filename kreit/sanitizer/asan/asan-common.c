@@ -908,10 +908,8 @@ int asan_giovese_report_and_crash(int access_type, vaddr addr, size_t n,
     return -1;
 }
 
-int asan_giovese_load1(vaddr ptr)
+bool asan_check_curr_thread_enabled(void)
 {
-    int8_t* shadow_addr;
-    int8_t k;
     AsanThreadInfo *thread_info;
 
     qemu_spin_lock(&asan_state->asan_threadinfo_lock);
@@ -919,10 +917,16 @@ int asan_giovese_load1(vaddr ptr)
         thread_info_hash_key(*curr_cpu_data(current_pid), current_cpu->cpu_index));
     if (!thread_info || !thread_info->asan_enabled) {
         qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-        return 0;
+        return false;
     }
     qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
+    return true;
+}
 
+int asan_giovese_load1(vaddr ptr)
+{
+    int8_t* shadow_addr;
+    int8_t k;
     shadow_addr = get_shadow_addr(ptr);
     k = *shadow_addr;
     return k != 0 && (intptr_t)((ptr & 7) + 1) > k;
@@ -932,17 +936,6 @@ int asan_giovese_load2(vaddr ptr)
 {
     int8_t* shadow_addr;
     int8_t k;
-    AsanThreadInfo *thread_info;
-
-    qemu_spin_lock(&asan_state->asan_threadinfo_lock);
-    thread_info = g_hash_table_lookup(asan_state->asan_threadinfo,
-        thread_info_hash_key(*curr_cpu_data(current_pid), current_cpu->cpu_index));
-    if (!thread_info || !thread_info->asan_enabled) {
-        qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-        return 0;
-    }
-    qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-
     shadow_addr = get_shadow_addr(ptr);
     k = *shadow_addr;
     return k != 0 && (intptr_t)((ptr & 7) + 2) > k;
@@ -952,17 +945,6 @@ int asan_giovese_load4(vaddr ptr)
 {
     int8_t* shadow_addr;
     int8_t k;
-    AsanThreadInfo *thread_info;
-
-    qemu_spin_lock(&asan_state->asan_threadinfo_lock);
-    thread_info = g_hash_table_lookup(asan_state->asan_threadinfo,
-        thread_info_hash_key(*curr_cpu_data(current_pid), current_cpu->cpu_index));
-    if (!thread_info || !thread_info->asan_enabled) {
-        qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-        return 0;
-    }
-    qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-
     shadow_addr = get_shadow_addr(ptr);
     k = *shadow_addr;
     return k != 0 && (intptr_t)((ptr & 7) + 4) > k;
@@ -971,17 +953,6 @@ int asan_giovese_load4(vaddr ptr)
 int asan_giovese_load8(vaddr ptr)
 {
     int8_t* shadow_addr;
-    AsanThreadInfo *thread_info;
-
-    qemu_spin_lock(&asan_state->asan_threadinfo_lock);
-    thread_info = g_hash_table_lookup(asan_state->asan_threadinfo,
-        thread_info_hash_key(*curr_cpu_data(current_pid), current_cpu->cpu_index));
-    if (!thread_info || !thread_info->asan_enabled) {
-        qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-        return 0;
-    }
-    qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-
     shadow_addr = get_shadow_addr(ptr);
     return (*shadow_addr);
 }
@@ -989,17 +960,6 @@ int asan_giovese_load8(vaddr ptr)
 int asan_giovese_load16(vaddr ptr)
 {
     int8_t* shadow_addr;
-    AsanThreadInfo *thread_info;
-
-    qemu_spin_lock(&asan_state->asan_threadinfo_lock);
-    thread_info = g_hash_table_lookup(asan_state->asan_threadinfo,
-        thread_info_hash_key(*curr_cpu_data(current_pid), current_cpu->cpu_index));
-    if (!thread_info || !thread_info->asan_enabled) {
-        qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-        return 0;
-    }
-    qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-
     shadow_addr = get_shadow_addr(ptr);
     return (*shadow_addr) || (*(shadow_addr + 1));
 }
@@ -1008,17 +968,6 @@ int asan_giovese_store1(vaddr ptr)
 {
     int8_t* shadow_addr;
     int8_t k;
-    AsanThreadInfo *thread_info;
-
-    qemu_spin_lock(&asan_state->asan_threadinfo_lock);
-    thread_info = g_hash_table_lookup(asan_state->asan_threadinfo,
-        thread_info_hash_key(*curr_cpu_data(current_pid), current_cpu->cpu_index));
-    if (!thread_info || !thread_info->asan_enabled) {
-        qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-        return 0;
-    }
-    qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-
     shadow_addr = get_shadow_addr(ptr);
     k = *shadow_addr;
     return k != 0 && (intptr_t)((ptr & 7) + 1) > k;
@@ -1028,17 +977,6 @@ int asan_giovese_store2(vaddr ptr)
 {
     int8_t* shadow_addr;
     int8_t k;
-    AsanThreadInfo *thread_info;
-
-    qemu_spin_lock(&asan_state->asan_threadinfo_lock);
-    thread_info = g_hash_table_lookup(asan_state->asan_threadinfo,
-        thread_info_hash_key(*curr_cpu_data(current_pid), current_cpu->cpu_index));
-    if (!thread_info || !thread_info->asan_enabled) {
-        qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-        return 0;
-    }
-    qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-
     shadow_addr = get_shadow_addr(ptr);
     k = *shadow_addr;
     return k != 0 && (intptr_t)((ptr & 7) + 2) > k;
@@ -1048,17 +986,6 @@ int asan_giovese_store4(vaddr ptr)
 {
     int8_t* shadow_addr;
     int8_t k;
-    AsanThreadInfo *thread_info;
-
-    qemu_spin_lock(&asan_state->asan_threadinfo_lock);
-    thread_info = g_hash_table_lookup(asan_state->asan_threadinfo,
-        thread_info_hash_key(*curr_cpu_data(current_pid), current_cpu->cpu_index));
-    if (!thread_info || !thread_info->asan_enabled) {
-        qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-        return 0;
-    }
-    qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-
     shadow_addr = get_shadow_addr(ptr);
     k = *shadow_addr;
     return k != 0 && (intptr_t)((ptr & 7) + 4) > k;
@@ -1067,17 +994,6 @@ int asan_giovese_store4(vaddr ptr)
 int asan_giovese_store8(vaddr ptr)
 {
     int8_t* shadow_addr;
-    AsanThreadInfo *thread_info;
-
-    qemu_spin_lock(&asan_state->asan_threadinfo_lock);
-    thread_info = g_hash_table_lookup(asan_state->asan_threadinfo,
-        thread_info_hash_key(*curr_cpu_data(current_pid), current_cpu->cpu_index));
-    if (!thread_info || !thread_info->asan_enabled) {
-        qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-        return 0;
-    }
-    qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-
     shadow_addr = get_shadow_addr(ptr);
     return (*shadow_addr);
 }
@@ -1085,17 +1001,6 @@ int asan_giovese_store8(vaddr ptr)
 int asan_giovese_store16(vaddr ptr)
 {
     int8_t* shadow_addr;
-    AsanThreadInfo *thread_info;
-
-    qemu_spin_lock(&asan_state->asan_threadinfo_lock);
-    thread_info = g_hash_table_lookup(asan_state->asan_threadinfo,
-        thread_info_hash_key(*curr_cpu_data(current_pid), current_cpu->cpu_index));
-    if (!thread_info || !thread_info->asan_enabled) {
-        qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-        return 0;
-    }
-    qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-
     shadow_addr = get_shadow_addr(ptr);
     return (*shadow_addr) || (*(shadow_addr + 1));
 }

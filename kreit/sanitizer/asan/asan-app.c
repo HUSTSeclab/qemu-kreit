@@ -705,29 +705,66 @@ static void app_asan_trace_whitelist_finished(KreitAsanState *appdata,
     thread_info->asan_enabled = pending_hook->staged_asan_state;
 }
 
+static inline vaddr linux_page_address(vaddr page)
+{
+    // refer to the kernel's page_address() macro.
+    return (((page - 0xffffea0000000000) << 6) + 0xffff888000000000);
+}
+
 static void app_asan_trace_prep_compound_page(KreitAsanState *appdata,
     CPUArchState* env, KreitPendingHook *pending_hook)
 {
     AsanThreadInfo *thread_info = pending_hook->thread_info;
 
-    vaddr page;
+    vaddr page_addr;
     unsigned int order;
 
     // disable kasan before returning
     pending_hook->staged_asan_state = thread_info->asan_enabled;
     thread_info->asan_enabled = false;
 
-    page = kreit_get_abi_param(env, 1);
+    page_addr = linux_page_address(kreit_get_abi_param(env, 1));
     order = kreit_get_abi_param(env, 2);
 
     if (kreitapp_get_verbose(OBJECT(appdata)) >= 1)
-        qemu_log("prep_compound_page at %#018lx, order: %d\n", page, order);
+        qemu_log("prep_compound_page at %#018lx, order: %d\n", page_addr, order);
 
-    if (page >= appdata->alloc_range_start && page <= appdata->alloc_range_end)
-        asan_unpoison_region(page, 4096 * 1 << order);
+    if (page_addr >= appdata->alloc_range_start && page_addr <= appdata->alloc_range_end)
+        asan_unpoison_region(page_addr, 4096 * (1 << order));
 }
 
 static void app_asan_trace_prep_compound_page_finished(KreitAsanState *appdata,
+    CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+
+    // restore the asan state
+    thread_info->asan_enabled = pending_hook->staged_asan_state;
+}
+
+static void app_asan_trace_post_alloc_hook(KreitAsanState *appdata,
+    CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+
+    vaddr page_addr;
+    unsigned int nr_pages;
+
+    // disable kasan before returning
+    pending_hook->staged_asan_state = thread_info->asan_enabled;
+    thread_info->asan_enabled = false;
+
+    page_addr = linux_page_address(kreit_get_abi_param(env, 1));
+    nr_pages = 1 << kreit_get_abi_param(env, 2);
+
+    if (kreitapp_get_verbose(OBJECT(appdata)) >= 1)
+        qemu_log("post_alloc_hook at %#018lx, nr_pages: %d\n", page_addr, nr_pages);
+
+    if (page_addr >= appdata->alloc_range_start && page_addr <= appdata->alloc_range_end)
+        asan_unpoison_region(page_addr, 4096 * nr_pages);
+}
+
+static void app_asan_trace_post_alloc_hook_finished(KreitAsanState *appdata,
     CPUArchState* env, KreitPendingHook *pending_hook)
 {
     AsanThreadInfo *thread_info = pending_hook->thread_info;
@@ -751,7 +788,7 @@ static void app_asan_trace_clear_page_rep(KreitAsanState *appdata,
     if (kreitapp_get_verbose(OBJECT(appdata)) >= 1)
         qemu_log("clear_page_rep at %#018lx\n", page);
 
-    asan_unpoison_region(page, 4096);
+    // asan_unpoison_region(page, 4096);
 }
 
 static void app_asan_trace_clear_page_rep_finished(KreitAsanState *appdata,
@@ -835,6 +872,10 @@ static void app_asan_trace_hook(void *instr_data, void *userdata)
         case ASAN_HOOK_PREP_COMPOUND_PAGE:
             pending_hook->trace_start = app_asan_trace_prep_compound_page;
             pending_hook->trace_finished = app_asan_trace_prep_compound_page_finished;
+            break;
+        case ASAN_HOOK_POST_ALLOC_HOOK:
+            pending_hook->trace_start = app_asan_trace_post_alloc_hook;
+            pending_hook->trace_finished = app_asan_trace_post_alloc_hook_finished;
             break;
         case ASAN_HOOK_CLEAR_PAGE_REP:
             pending_hook->trace_start = app_asan_trace_clear_page_rep;
@@ -1016,6 +1057,8 @@ static void get_asan_kernel_info(KreitAsanState *kas)
             kas->asan_hook[i].type = ASAN_HOOK_WHITELIST;
         } else if (strcmp(hook_type, "prep_compound_page") == 0) {
             kas->asan_hook[i].type = ASAN_HOOK_PREP_COMPOUND_PAGE;
+        } else if (strcmp(hook_type, "post_alloc_hook") == 0) {
+            kas->asan_hook[i].type = ASAN_HOOK_POST_ALLOC_HOOK;
         } else if (strcmp(hook_type, "clear_page_rep") == 0) {
             kas->asan_hook[i].type = ASAN_HOOK_CLEAR_PAGE_REP;
         } else if (strcmp(hook_type, "handle_mm_fault") == 0) {
