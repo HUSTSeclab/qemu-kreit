@@ -60,24 +60,17 @@ void asan_poison_region(vaddr ptr, size_t n, uint8_t poison_byte)
     if (n == 0)
         return;
 
-    // process partial bytes
-    if (start & 0x7) {
-        shadow_addr = get_shadow_addr(start);
-        *((uint8_t *)shadow_addr) = start & 0x7;
-    }
-
-    if (end & 0x7) {
-        shadow_addr = get_shadow_addr(end);
-        *((uint8_t *)(shadow_addr + 1)) = end & 0x7;
-    }
-
     // process others
+    // now this function only support bytes aligned to 8
     start = ROUND_UP(start, 8);
     end = ROUND_DOWN(end, 8);
     shadow_size = (end - start) >> 3;
     shadow_addr = get_shadow_addr(start);
 
-    memset(shadow_addr, poison_byte, shadow_size);
+    for (size_t i = 0; i < shadow_size; i++) {
+        uint8_t *this_byte = shadow_addr + i;
+        *this_byte = *this_byte | poison_byte;
+    }
 }
 
 void asan_unpoison_region(vaddr ptr, size_t n)
@@ -96,7 +89,6 @@ void asan_unpoison_region(vaddr ptr, size_t n)
 static const char* poisoned_strerror(uint8_t poison_byte)
 {
     switch (poison_byte) {
-        case ASAN_HEAP_RZ:
         case ASAN_HEAP_LEFT_RZ:
         case ASAN_HEAP_RIGHT_RZ: return "heap-buffer-overflow";
         case ASAN_HEAP_FREED: return "heap-use-after-free";
@@ -119,19 +111,6 @@ static int poisoned_find_error(vaddr addr, size_t n,
         int8_t* shadow_addr = get_shadow_addr(addr);
         switch (*shadow_addr) {
             case ASAN_VALID: have_partials = 0; break;
-            case ASAN_PARTIAL1:
-            case ASAN_PARTIAL2:
-            case ASAN_PARTIAL3:
-            case ASAN_PARTIAL4:
-            case ASAN_PARTIAL5:
-            case ASAN_PARTIAL6:
-            case ASAN_PARTIAL7: {
-                have_partials = 1;
-                vaddr a = (start & ~7) + *shadow_addr;
-                if (*fault_addr == 0 && a >= start && a < end) *fault_addr = a;
-                break;
-
-            }
             default: {
                 if (*fault_addr == 0) *fault_addr = start;
                 *err_string = poisoned_strerror(*shadow_addr);
