@@ -888,32 +888,9 @@ int asan_giovese_report_and_crash(int access_type, vaddr addr, size_t n,
     return -1;
 }
 
-static bool asan_check_curr_thread_enabled(void)
-{
-    AsanThreadInfo *thread_info;
-
-    qemu_spin_lock(&asan_state->asan_threadinfo_lock);
-    thread_info = g_hash_table_lookup(asan_state->asan_threadinfo,
-        thread_info_hash_key(*curr_cpu_data(current_pid), current_cpu->cpu_index));
-    if (!thread_info || !thread_info->asan_enabled) {
-        qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-        return false;
-    }
-    qemu_spin_unlock(&asan_state->asan_threadinfo_lock);
-    return true;
-}
-
 static inline bool asan_check_range(vaddr addr)
 {
     return (addr < asan_state->alloc_range_end && addr >= asan_state->alloc_range_start);
-}
-
-static inline bool check_asan_valid(vaddr ptr)
-{
-    if (asan_check_range(ptr) && asan_check_curr_thread_enabled())
-        return true;
-    else
-        return false;
 }
 
 static inline void msan_load_uninitialized(CPUArchState *env, vaddr ptr, size_t size)
@@ -935,10 +912,14 @@ static inline void asan_access_poisoned(CPUArchState *env, vaddr ptr, size_t siz
 
 static inline void asan_giovese_load_n(CPUArchState *env, vaddr ptr, size_t size)
 {
+    AsanThreadInfo *thread_info;
     int8_t* shadow_addr;
     int8_t k;
 
-    if (!check_asan_valid(ptr))
+    if (!asan_check_range(ptr))
+        return;
+    thread_info = curr_cpu_thread_info();
+    if (!thread_info || !thread_info->asan_enabled)
         return;
 
     shadow_addr = get_shadow_addr(ptr);
@@ -963,6 +944,7 @@ static inline void asan_giovese_load_n(CPUArchState *env, vaddr ptr, size_t size
 
 static inline void asan_giovese_store_n(CPUArchState *env, vaddr ptr, size_t size)
 {
+    AsanThreadInfo *thread_info;
     int8_t* shadow_addr;
     int8_t k;
 
@@ -985,7 +967,9 @@ static inline void asan_giovese_store_n(CPUArchState *env, vaddr ptr, size_t siz
         }
     }
 
-    if (!asan_check_curr_thread_enabled())
+    thread_info = curr_cpu_thread_info();
+
+    if (!thread_info || !thread_info->asan_enabled)
         return;
 
     if (size <= 8) {

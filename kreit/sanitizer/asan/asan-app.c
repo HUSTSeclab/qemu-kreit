@@ -834,7 +834,6 @@ static void app_asan_trace_hook(void *instr_data, void *userdata)
     KreitAsanState *appdata = userdata;
     KreitPendingHook *pending_hook;
     AsanThreadInfo *thread_info;
-    int pid = *curr_cpu_data(current_pid);
 
     pending_hook = g_malloc0(sizeof(KreitPendingHook));
     pending_hook->hook_info = &appdata->asan_hook[hook_data->hook_index];
@@ -842,9 +841,7 @@ static void app_asan_trace_hook(void *instr_data, void *userdata)
     pending_hook->stack_ptr = kreit_get_stack_ptr(env);
     pending_hook->cpl = get_cpu_privilege(env);
 
-    qemu_spin_lock(&appdata->asan_threadinfo_lock);
-    thread_info = g_hash_table_lookup(appdata->asan_threadinfo, thread_info_hash_key(pid, current_cpu->cpu_index));
-    qemu_spin_unlock(&appdata->asan_threadinfo_lock);
+    thread_info = curr_cpu_thread_info();
     thread_info->hook_func_not_return = true;
     pending_hook->thread_info = thread_info;
 
@@ -983,24 +980,22 @@ static void app_asan_trace_context_switch(void *instr_data, void *userdata)
 
     qemu_spin_lock(&appdata->asan_threadinfo_lock);
     thread_info = g_hash_table_lookup(appdata->asan_threadinfo, thread_info_hash_key(spair->next, current_cpu->cpu_index));
-    if (thread_info) {
+    if (!thread_info) {
+        // insert new thread info
+        thread_info = g_malloc0(sizeof(AsanThreadInfo));
+        thread_info->pid = spair->next;
+        thread_info->asan_enabled = true;
         strncpy(thread_info->process_name, spair->next_name, PROCESS_NAME_LENGTH);
-        if (strstr(spair->next_name, "poc") && !thread_info->hook_func_not_return) {
-            thread_info->asan_enabled = true;
-        }
-        else
-            thread_info->asan_enabled = false;
-        qemu_spin_unlock(&appdata->asan_threadinfo_lock);
-        return;
+        g_hash_table_insert(appdata->asan_threadinfo,
+            thread_info_hash_key(spair->next, current_cpu->cpu_index), thread_info);
     }
 
-    // insert new thread info
-    thread_info = g_malloc0(sizeof(AsanThreadInfo));
-    thread_info->pid = spair->next;
-    thread_info->asan_enabled = true;
     strncpy(thread_info->process_name, spair->next_name, PROCESS_NAME_LENGTH);
-
-    g_hash_table_insert(appdata->asan_threadinfo, thread_info_hash_key(spair->next, current_cpu->cpu_index), thread_info);
+    if (strstr(spair->next_name, "poc") && !thread_info->hook_func_not_return)
+        thread_info->asan_enabled = true;
+    else
+        thread_info->asan_enabled = false;
+    appdata->cpu_thread_info[current_cpu->cpu_index] = thread_info;
     qemu_spin_unlock(&appdata->asan_threadinfo_lock);
 }
 
@@ -1016,7 +1011,7 @@ static int asan_app_init_userdata(Object *obj)
         for (int i = 0; i < kcont.nr_cpus; i++) {
             new_thread_info = g_malloc0(sizeof(AsanThreadInfo));
             new_thread_info->pid = 0;
-
+            kas->cpu_thread_info[i] = new_thread_info;
             g_hash_table_insert(kas->asan_threadinfo, thread_info_hash_key(0, i), new_thread_info);
         }
         break;
@@ -1027,7 +1022,7 @@ static int asan_app_init_userdata(Object *obj)
         for (int i = 0; i < kcont.nr_cpus; i++) {
             new_thread_info = g_malloc0(sizeof(AsanThreadInfo));
             new_thread_info->pid = 1;
-
+            kas->cpu_thread_info[i] = new_thread_info;
             g_hash_table_insert(kas->asan_threadinfo, thread_info_hash_key(1, i), new_thread_info);
         }
         break;
@@ -1162,6 +1157,8 @@ static void kreit_asan_instance_init(Object *obj)
         default:
             g_assert(0 && "unknown trace target");
     }
+
+    kas->cpu_thread_info = g_malloc0(sizeof(void *) * kcont.nr_cpus);
 
     kac->register_instr(obj, KREIT_INSTR_TB_START_ADDR, app_asan_trace_tb_start);
     kac->register_instr(obj, KREIT_INSTR_GEN_TB_START, app_asan_insert_asan_helper);

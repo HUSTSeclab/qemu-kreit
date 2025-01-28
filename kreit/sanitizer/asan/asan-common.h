@@ -121,6 +121,9 @@ typedef struct KreitAsanState {
 
     void *shadow_base;
 
+    // per-cpu data
+    AsanThreadInfo **cpu_thread_info;
+
     // per-run data
     QemuSpin asan_threadinfo_lock;
     GHashTable *asan_threadinfo;
@@ -216,6 +219,11 @@ static inline gpointer thread_info_hash_key(int pid, int cpu_index)
     default:
         return 0;
     }
+}
+
+static inline AsanThreadInfo *curr_cpu_thread_info(void)
+{
+    return asan_state->cpu_thread_info[current_cpu->cpu_index];
 }
 
 #endif // __ASAN_COMMON_H__
