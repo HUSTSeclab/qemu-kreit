@@ -659,7 +659,7 @@ static void asan_trace_qnx_srealloc_finished(KreitAsanState *appdata, CPUArchSta
     vaddr curr_pc;
     AsanAllocatedInfo *allocated_info = NULL;
 
-    sanitizer_state_stash_push(thread_info, pending_hook);
+    sanitizer_state_stash_pop(thread_info, pending_hook);
 
     curr_pc = kreit_get_pc(env);
     prev_stack_ptr = kreit_get_stack_ptr(env) - 8;
@@ -974,6 +974,7 @@ static void app_asan_trace_context_switch(void *instr_data, void *userdata)
     if (strstr(spair->next_name, "poc") && !thread_info->hook_func_not_return)
         thread_info->msan_enabled = appdata->msan;
     appdata->cpu_thread_info[current_cpu->cpu_index] = thread_info;
+    qemu_log("asan enabled state: %d\n, pid: %d\n", thread_info->asan_enabled, thread_info->pid);
     qemu_spin_unlock(&appdata->asan_threadinfo_lock);
 }
 
@@ -996,10 +997,14 @@ static int asan_app_init_userdata(Object *obj)
     case TRACE_TARGET_QNX:
         new_thread_info = g_malloc0(sizeof(AsanThreadInfo));
         new_thread_info->pid = 0;
+        new_thread_info->asan_enabled = true;
+        new_thread_info->msan_enabled = false;
         g_hash_table_insert(kas->asan_threadinfo, thread_info_hash_key(0, 0), new_thread_info);
         for (int i = 0; i < kcont.nr_cpus; i++) {
             new_thread_info = g_malloc0(sizeof(AsanThreadInfo));
             new_thread_info->pid = 1;
+            new_thread_info->asan_enabled = true;
+            new_thread_info->msan_enabled = false;
             kas->cpu_thread_info[i] = new_thread_info;
             g_hash_table_insert(kas->asan_threadinfo, thread_info_hash_key(1, i), new_thread_info);
         }
