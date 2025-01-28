@@ -919,25 +919,33 @@ static inline void asan_giovese_load_n(CPUArchState *env, vaddr ptr, size_t size
     if (!asan_check_range(ptr))
         return;
     thread_info = curr_cpu_thread_info();
-    if (!thread_info || !thread_info->asan_enabled)
+    if (!thread_info)
         return;
 
     shadow_addr = get_shadow_addr(ptr);
     k = *shadow_addr;
 
-    if (size <= 8) {
-        if (k & ASAN_POISONED) {
-            asan_access_poisoned(env, ptr, size, ACCESS_TYPE_LOAD);
+    if (thread_info->asan_enabled) {
+        if (size <= 8) {
+            if (k & ASAN_POISONED) {
+                asan_access_poisoned(env, ptr, size, ACCESS_TYPE_LOAD);
+            }
+        } else {
+            if ((*shadow_addr & ASAN_POISONED) || (*(shadow_addr + 1) & ASAN_POISONED)) {
+                asan_access_poisoned(env, ptr, size, ACCESS_TYPE_LOAD);
+            }
         }
-        if (k & MSAN_UNINITILIZED) {
-            msan_load_uninitialized(env, ptr, size);
-        }
-    } else {
-        if ((*shadow_addr & ASAN_POISONED) || (*(shadow_addr + 1) & ASAN_POISONED)) {
-            asan_access_poisoned(env, ptr, size, ACCESS_TYPE_LOAD);
-        }
-        if ((*shadow_addr & MSAN_UNINITILIZED) || (*(shadow_addr + 1) & MSAN_UNINITILIZED)) {
-            msan_load_uninitialized(env, ptr, size);
+    }
+
+    if (thread_info->msan_enabled) {
+        if (size <= 8) {
+            if (k & MSAN_UNINITILIZED) {
+                msan_load_uninitialized(env, ptr, size);
+            }
+        } else {
+            if ((*shadow_addr & MSAN_UNINITILIZED) || (*(shadow_addr + 1) & MSAN_UNINITILIZED)) {
+                msan_load_uninitialized(env, ptr, size);
+            }
         }
     }
 }
@@ -953,9 +961,24 @@ static inline void asan_giovese_store_n(CPUArchState *env, vaddr ptr, size_t siz
 
     if (!asan_check_range(ptr))
         return;
+    thread_info = curr_cpu_thread_info();
+    if (!thread_info)
+        return;
 
     shadow_addr = get_shadow_addr(ptr);
     k = *shadow_addr;
+
+    if (thread_info->asan_enabled) {
+        if (size <= 8) {
+            if (k & ASAN_POISONED) {
+                asan_access_poisoned(env, ptr, size, ACCESS_TYPE_STORE);
+            }
+        } else {
+            if ((*shadow_addr & ASAN_POISONED) || (*(shadow_addr + 1) & ASAN_POISONED)) {
+                asan_access_poisoned(env, ptr, size, ACCESS_TYPE_STORE);
+            }
+        }
+    }
 
     if (size <= 8) {
         if (k & MSAN_UNINITILIZED) {
@@ -964,21 +987,6 @@ static inline void asan_giovese_store_n(CPUArchState *env, vaddr ptr, size_t siz
     } else {
         if ((*shadow_addr & MSAN_UNINITILIZED) || (*(shadow_addr + 1) & MSAN_UNINITILIZED)) {
             msan_store_uninitialized(env, ptr, size);
-        }
-    }
-
-    thread_info = curr_cpu_thread_info();
-
-    if (!thread_info || !thread_info->asan_enabled)
-        return;
-
-    if (size <= 8) {
-        if (k & ASAN_POISONED) {
-            asan_access_poisoned(env, ptr, size, ACCESS_TYPE_STORE);
-        }
-    } else {
-        if ((*shadow_addr & ASAN_POISONED) || (*(shadow_addr + 1) & ASAN_POISONED)) {
-            asan_access_poisoned(env, ptr, size, ACCESS_TYPE_STORE);
         }
     }
 }

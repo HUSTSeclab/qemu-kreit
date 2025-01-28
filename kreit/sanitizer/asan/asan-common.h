@@ -113,6 +113,7 @@ typedef struct KreitAsanState {
     /*< public >*/
     // config
     int stack_record_len;
+    bool msan;
 
     KreitAsanInstrInfo *asan_hook;
     size_t nr_asan_hook;
