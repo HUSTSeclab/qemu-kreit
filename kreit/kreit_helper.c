@@ -50,120 +50,58 @@ void HELPER(kreit_trace_asan_hook)(CPUArchState *env, uint32_t hook_index)
 
 void HELPER(qasan_load1)(CPUArchState *env, target_ulong addr)
 {
-    if (!asan_check_range(addr))
-        return;
-    if (!asan_check_curr_thread_enabled())
-        return;
+    asan_giovese_load1(env, addr);
+    // if (!asan_check_range(addr))
+    //     return;
+    // if (!asan_check_curr_thread_enabled())
+    //     return;
 
-    if (asan_giovese_load1(addr)) {
-        asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, 1, env);
-    }
+    // if () {
+    //     asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, 1, env);
+    // }
 }
 
 void HELPER(qasan_load2)(CPUArchState *env, target_ulong addr)
 {
-    if (!asan_check_range(addr))
-        return;
-    if (!asan_check_curr_thread_enabled())
-        return;
-
-    if (asan_giovese_load2(addr)) {
-        asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, 2, env);
-    }
+    asan_giovese_load2(env, addr);
 }
 
 void HELPER(qasan_load4)(CPUArchState *env, target_ulong addr)
 {
-    if (!asan_check_range(addr))
-        return;
-    if (!asan_check_curr_thread_enabled())
-        return;
-
-    if (asan_giovese_load4(addr)) {
-        asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, 4, env);
-    }
+    asan_giovese_load4(env, addr);
 }
 
 void HELPER(qasan_load8)(CPUArchState *env, target_ulong addr)
 {
-    if (!asan_check_range(addr))
-        return;
-    if (!asan_check_curr_thread_enabled())
-        return;
-
-    if (asan_giovese_load8(addr)) {
-        asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, 8, env);
-    }
+    asan_giovese_load8(env, addr);
 }
 
 void HELPER(qasan_load16)(CPUArchState *env, target_ulong addr)
 {
-    if (!asan_check_range(addr))
-        return;
-    if (!asan_check_curr_thread_enabled())
-        return;
-
-    if (asan_giovese_load16(addr)) {
-        asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, 16, env);
-    }
+    asan_giovese_load16(env, addr);
 }
 
 void HELPER(qasan_store1)(CPUArchState *env, target_ulong addr)
 {
-    if (!asan_check_range(addr))
-        return;
-    if (!asan_check_curr_thread_enabled())
-        return;
-
-    if (asan_giovese_store1(addr)) {
-        asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, 1, env);
-    }
+    asan_giovese_store1(env, addr);
 }
 
 void HELPER(qasan_store2)(CPUArchState *env, target_ulong addr)
 {
-    if (!asan_check_range(addr))
-        return;
-    if (!asan_check_curr_thread_enabled())
-        return;
-
-    if (asan_giovese_store2(addr)) {
-        asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, 2, env);
-    }
+    asan_giovese_store2(env, addr);
 }
 
 void HELPER(qasan_store4)(CPUArchState *env, target_ulong addr)
 {
-    if (!asan_check_range(addr))
-        return;
-    if (!asan_check_curr_thread_enabled())
-        return;
-
-    if (asan_giovese_store4(addr)) {
-        asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, 4, env);
-    }
+    asan_giovese_store4(env, addr);
 }
 
 void HELPER(qasan_store8)(CPUArchState *env, target_ulong addr)
 {
-    if (!asan_check_range(addr))
-        return;
-    if (!asan_check_curr_thread_enabled())
-        return;
-
-    if (asan_giovese_store8(addr)) {
-        asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, 8, env);
-    }
+    asan_giovese_store8(env, addr);
 }
 
 void HELPER(qasan_store16)(CPUArchState *env, target_ulong addr)
 {
-    if (!asan_check_range(addr))
-        return;
-    if (!asan_check_curr_thread_enabled())
-        return;
-
-    if (asan_giovese_store16(addr)) {
-        asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, 16, env);
-    }
+    asan_giovese_store16(env, addr);
 }

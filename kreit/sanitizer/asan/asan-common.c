@@ -92,6 +92,7 @@ static const char* poisoned_strerror(uint8_t poison_byte)
         case ASAN_HEAP_LEFT_RZ:
         case ASAN_HEAP_RIGHT_RZ: return "heap-buffer-overflow";
         case ASAN_HEAP_FREED: return "heap-use-after-free";
+        case MSAN_UNINITILIZED: return "load-uninitialized";
     }
 
     qemu_log("unknwon asan redzone err value: %d\n", poison_byte);
@@ -887,7 +888,7 @@ int asan_giovese_report_and_crash(int access_type, vaddr addr, size_t n,
     return -1;
 }
 
-bool asan_check_curr_thread_enabled(void)
+static bool asan_check_curr_thread_enabled(void)
 {
     AsanThreadInfo *thread_info;
 
@@ -902,84 +903,148 @@ bool asan_check_curr_thread_enabled(void)
     return true;
 }
 
-int asan_giovese_load1(vaddr ptr)
+static inline bool asan_check_range(vaddr addr)
+{
+    return (addr < asan_state->alloc_range_end && addr >= asan_state->alloc_range_start);
+}
+
+static inline bool check_asan_valid(vaddr ptr)
+{
+    if (asan_check_range(ptr) && asan_check_curr_thread_enabled())
+        return true;
+    else
+        return false;
+}
+
+static inline void msan_load_uninitialized(CPUArchState *env, vaddr ptr, size_t size)
+{
+    // qemu_log("load uninitilized memory at %#018lx, eip: %#018lx\n", ptr, env->eip);
+    asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, ptr, size, env);
+}
+
+static inline void msan_store_uninitialized(CPUArchState *env, vaddr ptr, size_t size)
+{
+    // qemu_log("ptr: %#018lx, size: %ld, eip: %#018lx\n", ptr, size, env->eip);
+    asan_unpoison_region(ROUND_DOWN(ptr, 8), ROUND_UP(size, 8));
+}
+
+static inline void asan_access_poisoned(CPUArchState *env, vaddr ptr, size_t size, int access_type)
+{
+    asan_giovese_report_and_crash(access_type, ptr, size, env);
+}
+
+static inline void asan_giovese_load_n(CPUArchState *env, vaddr ptr, size_t size)
 {
     int8_t* shadow_addr;
     int8_t k;
+
+    if (!check_asan_valid(ptr))
+        return;
+
     shadow_addr = get_shadow_addr(ptr);
     k = *shadow_addr;
-    return k != 0 && (intptr_t)((ptr & 7) + 1) > k;
+
+    if (size <= 8) {
+        if (k & ASAN_POISONED) {
+            asan_access_poisoned(env, ptr, size, ACCESS_TYPE_LOAD);
+        }
+        if (k & MSAN_UNINITILIZED) {
+            msan_load_uninitialized(env, ptr, size);
+        }
+    } else {
+        if ((*shadow_addr & ASAN_POISONED) || (*(shadow_addr + 1) & ASAN_POISONED)) {
+            asan_access_poisoned(env, ptr, size, ACCESS_TYPE_LOAD);
+        }
+        if ((*shadow_addr & MSAN_UNINITILIZED) || (*(shadow_addr + 1) & MSAN_UNINITILIZED)) {
+            msan_load_uninitialized(env, ptr, size);
+        }
+    }
 }
 
-int asan_giovese_load2(vaddr ptr)
+static inline void asan_giovese_store_n(CPUArchState *env, vaddr ptr, size_t size)
 {
     int8_t* shadow_addr;
     int8_t k;
+
+    // if (!check_asan_valid(ptr))
+    //     return;
+
+    if (!asan_check_range(ptr))
+        return;
+
     shadow_addr = get_shadow_addr(ptr);
     k = *shadow_addr;
-    return k != 0 && (intptr_t)((ptr & 7) + 2) > k;
+
+    if (size <= 8) {
+        if (k & MSAN_UNINITILIZED) {
+            msan_store_uninitialized(env, ptr, size);
+        }
+    } else {
+        if ((*shadow_addr & MSAN_UNINITILIZED) || (*(shadow_addr + 1) & MSAN_UNINITILIZED)) {
+            msan_store_uninitialized(env, ptr, size);
+        }
+    }
+
+    if (!asan_check_curr_thread_enabled())
+        return;
+
+    if (size <= 8) {
+        if (k & ASAN_POISONED) {
+            asan_access_poisoned(env, ptr, size, ACCESS_TYPE_STORE);
+        }
+    } else {
+        if ((*shadow_addr & ASAN_POISONED) || (*(shadow_addr + 1) & ASAN_POISONED)) {
+            asan_access_poisoned(env, ptr, size, ACCESS_TYPE_STORE);
+        }
+    }
 }
 
-int asan_giovese_load4(vaddr ptr)
+void asan_giovese_load1(CPUArchState *env, vaddr ptr)
 {
-    int8_t* shadow_addr;
-    int8_t k;
-    shadow_addr = get_shadow_addr(ptr);
-    k = *shadow_addr;
-    return k != 0 && (intptr_t)((ptr & 7) + 4) > k;
+    asan_giovese_load_n(env, ptr, 1);
 }
 
-int asan_giovese_load8(vaddr ptr)
+void asan_giovese_load2(CPUArchState *env, vaddr ptr)
 {
-    int8_t* shadow_addr;
-    shadow_addr = get_shadow_addr(ptr);
-    return (*shadow_addr);
+    asan_giovese_load_n(env, ptr, 2);
 }
 
-int asan_giovese_load16(vaddr ptr)
+void asan_giovese_load4(CPUArchState *env, vaddr ptr)
 {
-    int8_t* shadow_addr;
-    shadow_addr = get_shadow_addr(ptr);
-    return (*shadow_addr) || (*(shadow_addr + 1));
+    asan_giovese_load_n(env, ptr, 4);
 }
 
-int asan_giovese_store1(vaddr ptr)
+void asan_giovese_load8(CPUArchState *env, vaddr ptr)
 {
-    int8_t* shadow_addr;
-    int8_t k;
-    shadow_addr = get_shadow_addr(ptr);
-    k = *shadow_addr;
-    return k != 0 && (intptr_t)((ptr & 7) + 1) > k;
+    asan_giovese_load_n(env, ptr, 8);
 }
 
-int asan_giovese_store2(vaddr ptr)
+void asan_giovese_load16(CPUArchState *env, vaddr ptr)
 {
-    int8_t* shadow_addr;
-    int8_t k;
-    shadow_addr = get_shadow_addr(ptr);
-    k = *shadow_addr;
-    return k != 0 && (intptr_t)((ptr & 7) + 2) > k;
+    asan_giovese_load_n(env, ptr, 16);
 }
 
-int asan_giovese_store4(vaddr ptr)
+void asan_giovese_store1(CPUArchState *env, vaddr ptr)
 {
-    int8_t* shadow_addr;
-    int8_t k;
-    shadow_addr = get_shadow_addr(ptr);
-    k = *shadow_addr;
-    return k != 0 && (intptr_t)((ptr & 7) + 4) > k;
+    asan_giovese_store_n(env, ptr, 1);
 }
 
-int asan_giovese_store8(vaddr ptr)
+void asan_giovese_store2(CPUArchState *env, vaddr ptr)
 {
-    int8_t* shadow_addr;
-    shadow_addr = get_shadow_addr(ptr);
-    return (*shadow_addr);
+    asan_giovese_store_n(env, ptr, 2);
 }
 
-int asan_giovese_store16(vaddr ptr)
+void asan_giovese_store4(CPUArchState *env, vaddr ptr)
 {
-    int8_t* shadow_addr;
-    shadow_addr = get_shadow_addr(ptr);
-    return (*shadow_addr) || (*(shadow_addr + 1));
+    asan_giovese_store_n(env, ptr, 4);
+}
+
+void asan_giovese_store8(CPUArchState *env, vaddr ptr)
+{
+    asan_giovese_store_n(env, ptr, 8);
+}
+
+void asan_giovese_store16(CPUArchState *env, vaddr ptr)
+{
+    asan_giovese_store_n(env, ptr, 16);
 }

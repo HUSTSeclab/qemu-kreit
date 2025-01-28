@@ -28,6 +28,7 @@ typedef enum AsanHookType {
 typedef struct KreitAsanInstrInfo {
     AsanHookType type;
     int param_order;
+    int flag_order;
     vaddr addr;
 } KreitAsanInstrInfo;
 
@@ -52,6 +53,7 @@ typedef struct AsanCacheInfo {
     size_t request_size;
     size_t size;
     size_t redzone_size;
+    bool has_ctor;
 } AsanCacheInfo;
 
 typedef struct KreitAsanState KreitAsanState;
@@ -61,9 +63,11 @@ typedef struct KreitPendingHook KreitPendingHook;
 typedef struct AsanThreadInfo {
     int pid;
     bool asan_enabled;
+    bool msan_enabled;
     char process_name[PROCESS_NAME_LENGTH];
 
     // context info
+    bool hook_func_not_return;
 } AsanThreadInfo;
 
 typedef struct KreitPendingHook {
@@ -77,6 +81,7 @@ typedef struct KreitPendingHook {
     int cpl;
 
     bool staged_asan_state;
+    bool staged_msan_state;
     void (*trace_start)(KreitAsanState *appdata, CPUArchState *env, KreitPendingHook *thread_info);
     void (*trace_finished)(KreitAsanState *appdata, CPUArchState *env, KreitPendingHook *thread_info);
 
@@ -91,10 +96,15 @@ typedef struct KreitPendingHook {
     size_t nr_bulk;
     vaddr bulk_array;
 
+    // GFP_ZERO flag
+    bool value_initialized;
+
     // qnx assistance info
     size_t qnx_old_size;
     size_t qnx_new_size;
 } KreitPendingHook;
+
+#define __GFP_ZERO (1 << 8)
 
 typedef struct KreitAsanState {
     /*< private >*/
@@ -144,13 +154,6 @@ static inline void *get_shadow_addr(vaddr addr)
     return (void *) ((addr - asan_state->alloc_range_start) >> 3) + (vaddr) asan_state->shadow_base;
 }
 
-static inline bool asan_check_range(vaddr addr)
-{
-    return (addr < asan_state->alloc_range_end && addr >= asan_state->alloc_range_start);
-}
-
-bool asan_check_curr_thread_enabled(void);
-
 size_t asan_allocator_aligned_size(size_t size);
 // AsanThreadInfo *asan_get_thread_info(void);
 AsanAllocatedInfo *asan_get_allocated_info(vaddr addr);
@@ -160,16 +163,16 @@ void asan_unpoison_region(vaddr ptr, size_t n);
 int asan_giovese_report_and_crash(int access_type, vaddr addr, size_t n,
                                   CPUArchState *env);
 
-int asan_giovese_load1(vaddr ptr);
-int asan_giovese_load2(vaddr ptr);
-int asan_giovese_load4(vaddr ptr);
-int asan_giovese_load8(vaddr ptr);
-int asan_giovese_load16(vaddr ptr);
-int asan_giovese_store1(vaddr ptr);
-int asan_giovese_store2(vaddr ptr);
-int asan_giovese_store4(vaddr ptr);
-int asan_giovese_store8(vaddr ptr);
-int asan_giovese_store16(vaddr ptr);
+void asan_giovese_load1(CPUArchState *env, vaddr ptr);
+void asan_giovese_load2(CPUArchState *env, vaddr ptr);
+void asan_giovese_load4(CPUArchState *env, vaddr ptr);
+void asan_giovese_load8(CPUArchState *env, vaddr ptr);
+void asan_giovese_load16(CPUArchState *env, vaddr ptr);
+void asan_giovese_store1(CPUArchState *env, vaddr ptr);
+void asan_giovese_store2(CPUArchState *env, vaddr ptr);
+void asan_giovese_store4(CPUArchState *env, vaddr ptr);
+void asan_giovese_store8(CPUArchState *env, vaddr ptr);
+void asan_giovese_store16(CPUArchState *env, vaddr ptr);
 
 /* shadow map byte values */
 #define ASAN_VALID 0x00
@@ -184,9 +187,12 @@ int asan_giovese_store16(vaddr ptr);
 // #define ASAN_HEAP_RZ 0xe9
 // #define ASAN_USER 0xf7
 // #define ASAN_HEAP_LEFT_RZ 0xfa
+#define MSAN_UNINITILIZED (1 << 5)
+
 #define ASAN_HEAP_RIGHT_RZ (1 << 6)
 #define ASAN_HEAP_LEFT_RZ (2 << 6)
 #define ASAN_HEAP_FREED (3 << 6)
+#define ASAN_POISONED (3 << 6)
 
 enum {
     ACCESS_TYPE_LOAD,
