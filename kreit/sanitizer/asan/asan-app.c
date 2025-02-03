@@ -974,7 +974,6 @@ static void app_asan_trace_context_switch(void *instr_data, void *userdata)
     if (strstr(spair->next_name, "poc") && !thread_info->hook_func_not_return)
         thread_info->msan_enabled = appdata->msan;
     appdata->cpu_thread_info[current_cpu->cpu_index] = thread_info;
-    qemu_log("asan enabled state: %d\n, pid: %d\n", thread_info->asan_enabled, thread_info->pid);
     qemu_spin_unlock(&appdata->asan_threadinfo_lock);
 }
 
