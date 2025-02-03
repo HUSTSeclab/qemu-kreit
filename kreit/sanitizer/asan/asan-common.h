@@ -21,6 +21,7 @@ typedef enum AsanHookType {
     ASAN_HOOK_POST_ALLOC_HOOK,
     ASAN_HOOK_CLEAR_PAGE_REP,
     ASAN_HOOK_HANDLE_MM_PAGE_FAULT,
+    ASAN_HOOK_MEMCPY,
     ASAN_HOOK_QNX_SREALLOC,
     ASAN_HOOK_TYPE_END,
 } AsanHookType;
@@ -225,6 +226,28 @@ static inline gpointer thread_info_hash_key(int pid, int cpu_index)
 static inline AsanThreadInfo *curr_cpu_thread_info(void)
 {
     return asan_state->cpu_thread_info[current_cpu->cpu_index];
+}
+
+static inline bool asan_check_range(vaddr addr)
+{
+    return (addr < asan_state->alloc_range_end && addr >= asan_state->alloc_range_start);
+}
+
+static inline void msan_load_uninitialized(CPUArchState *env, vaddr ptr, size_t size)
+{
+    // qemu_log("load uninitilized memory at %#018lx, eip: %#018lx\n", ptr, env->eip);
+    asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, ptr, size, env);
+}
+
+static inline void msan_store_uninitialized(CPUArchState *env, vaddr ptr, size_t size)
+{
+    // qemu_log("ptr: %#018lx, size: %ld, eip: %#018lx\n", ptr, size, env->eip);
+    asan_unpoison_region(ROUND_DOWN(ptr, 8), ROUND_UP(size, 8));
+}
+
+static inline void asan_access_poisoned(CPUArchState *env, vaddr ptr, size_t size, int access_type)
+{
+    asan_giovese_report_and_crash(access_type, ptr, size, env);
 }
 
 #endif // __ASAN_COMMON_H__

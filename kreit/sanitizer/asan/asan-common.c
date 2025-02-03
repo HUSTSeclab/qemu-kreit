@@ -888,28 +888,6 @@ int asan_giovese_report_and_crash(int access_type, vaddr addr, size_t n,
     return -1;
 }
 
-static inline bool asan_check_range(vaddr addr)
-{
-    return (addr < asan_state->alloc_range_end && addr >= asan_state->alloc_range_start);
-}
-
-static inline void msan_load_uninitialized(CPUArchState *env, vaddr ptr, size_t size)
-{
-    // qemu_log("load uninitilized memory at %#018lx, eip: %#018lx\n", ptr, env->eip);
-    asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, ptr, size, env);
-}
-
-static inline void msan_store_uninitialized(CPUArchState *env, vaddr ptr, size_t size)
-{
-    // qemu_log("ptr: %#018lx, size: %ld, eip: %#018lx\n", ptr, size, env->eip);
-    asan_unpoison_region(ROUND_DOWN(ptr, 8), ROUND_UP(size, 8));
-}
-
-static inline void asan_access_poisoned(CPUArchState *env, vaddr ptr, size_t size, int access_type)
-{
-    asan_giovese_report_and_crash(access_type, ptr, size, env);
-}
-
 static inline void asan_giovese_load_n(CPUArchState *env, vaddr ptr, size_t size)
 {
     AsanThreadInfo *thread_info;

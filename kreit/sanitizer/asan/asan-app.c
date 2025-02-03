@@ -582,6 +582,71 @@ static void asan_trace_linux_free_bulk_finished(KreitAsanState *appdata, CPUArch
     }
 }
 
+static void asan_trace_memcpy(KreitAsanState *appdata, CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    int pid = *curr_cpu_data(current_pid);
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+    vaddr dest;
+    vaddr src;
+    size_t count;
+    void *dest_shadow;
+    void *src_shadow;
+    size_t shadow_count;
+    uint8_t shadow_byte;
+
+    dest = kreit_get_abi_param(env, 1);
+    src = kreit_get_abi_param(env, 2);
+    count = kreit_get_abi_param(env, 3);
+
+    sanitizer_state_stash_push(thread_info, pending_hook);
+    if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
+        qemu_log("qkasan: cpu %d pid %d cpl %d: memcpy dest: %#018lx src: %#018lx count: %ld\n",
+            current_cpu->cpu_index, pid, get_cpu_privilege(env),
+            dest, src, count);
+    }
+
+    shadow_count = count >> 3;
+    if (asan_check_range(dest)) {
+        dest_shadow = get_shadow_addr(dest);
+        for (int i = 0; i < shadow_count; i++) {
+            shadow_byte = *((uint8_t *)(dest_shadow + i));
+            if (shadow_byte & ASAN_POISONED) {
+                asan_access_poisoned(env, dest + (i << 3), 8, ACCESS_TYPE_STORE);
+            }
+            if (shadow_byte & MSAN_UNINITILIZED) {
+                msan_store_uninitialized(env, dest + (i << 3), 8);
+            }
+        }
+    }
+
+    if (asan_check_range(src)) {
+        src_shadow = get_shadow_addr(src);
+
+        for (int i = 0; i < shadow_count; i++) {
+            shadow_byte = *((uint8_t *)(src_shadow + i));
+            if (shadow_byte & ASAN_POISONED) {
+                asan_access_poisoned(env, src + (i << 3), 8, ACCESS_TYPE_LOAD);
+            }
+            if (shadow_byte & MSAN_UNINITILIZED) {
+                msan_load_uninitialized(env, src + (i << 3), 8);
+            }
+        }
+    }
+
+}
+
+static void asan_trace_memcpy_finished(KreitAsanState *appdata, CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+    vaddr memcpy_ret;
+
+    sanitizer_state_stash_pop(thread_info, pending_hook);
+    if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
+        memcpy_ret = kreit_get_return_value(env);
+        qemu_log("memcpy return: %#018lx\n", memcpy_ret);
+    }
+}
+
 static void asan_trace_qnx_srealloc(KreitAsanState *appdata, CPUArchState* env, KreitPendingHook *pending_hook)
 {
     int pid = *curr_cpu_data(current_pid);
@@ -887,6 +952,10 @@ static void app_asan_trace_hook(void *instr_data, void *userdata)
             break;
         case ASAN_HOOK_HANDLE_MM_PAGE_FAULT:
             break;
+        case ASAN_HOOK_MEMCPY:
+            pending_hook->trace_start = asan_trace_memcpy;
+            pending_hook->trace_finished = asan_trace_memcpy_finished;
+            break;
         case ASAN_HOOK_QNX_SREALLOC:
             pending_hook->trace_start = asan_trace_qnx_srealloc;
             pending_hook->trace_finished = asan_trace_qnx_srealloc_finished;
@@ -1075,6 +1144,8 @@ static void get_asan_kernel_info(KreitAsanState *kas)
             kas->asan_hook[i].type = ASAN_HOOK_CLEAR_PAGE_REP;
         } else if (strcmp(hook_type, "handle_mm_fault") == 0) {
             kas->asan_hook[i].type = ASAN_HOOK_HANDLE_MM_PAGE_FAULT;
+        } else if (strcmp(hook_type, "memcpy") == 0) {
+            kas->asan_hook[i].type = ASAN_HOOK_MEMCPY;
         } else if (strcmp(hook_type, "qnx-srealloc") == 0) {
             kas->asan_hook[i].type = ASAN_HOOK_QNX_SREALLOC;
         } else {
