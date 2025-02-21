@@ -1058,6 +1058,8 @@ static int asan_app_init_userdata(Object *obj)
         for (int i = 0; i < kcont.nr_cpus; i++) {
             new_thread_info = g_malloc0(sizeof(AsanThreadInfo));
             new_thread_info->pid = 0;
+            new_thread_info->asan_enabled = true;
+            new_thread_info->msan_enabled = false;
             kas->cpu_thread_info[i] = new_thread_info;
             g_hash_table_insert(kas->asan_threadinfo, thread_info_hash_key(0, i), new_thread_info);
         }
