@@ -11,6 +11,8 @@ typedef enum AsanHookType {
     ASAN_HOOK_TYPE_INVALID,
     ASAN_HOOK_ALLOC_KMEM_CACHE,
     ASAN_HOOK_KMEM_CACHE_CREATE,
+    ASAN_HOOK_KMEM_CACHE_ALIAS,
+    ASAN_HOOK_KMEM_CACHE_DESTORY,
     ASAN_HOOK_ALLOC_SIZE_IN_REGS,
     ASAN_HOOK_ALLOC_BULK,
     ASAN_HOOK_KSIZE,
@@ -74,6 +76,9 @@ typedef struct AsanThreadInfo {
 
     // avoid the reentran of kmem_cache_create
     // int in_kmem_cache_create;
+
+    // pass the request size to __kmem_cache_alias
+    size_t kmem_cache_create_requst_size;
 } AsanThreadInfo;
 
 typedef struct KreitPendingHook {
@@ -94,6 +99,9 @@ typedef struct KreitPendingHook {
     // store the unmature info
     AsanAllocatedInfo *allocated_info;
     AsanCacheInfo *cache_info;
+
+    // for kmem_cache_alias
+    size_t kmem_cache_alias_new_size;
 
     // ksize info
     vaddr ksize_ptr;

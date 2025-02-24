@@ -224,7 +224,7 @@ static void asan_trace_linux_kmem_cache_create(KreitAsanState *appdata,
     KreitAsanInstrInfo *hook_info = pending_hook->hook_info;
     vaddr ctor;
     unsigned int new_size;
-    unsigned int flag;
+    // unsigned int flag;
     unsigned int minimal_align;
     AsanCacheInfo *cache_info;
 
@@ -235,10 +235,12 @@ static void asan_trace_linux_kmem_cache_create(KreitAsanState *appdata,
 
     cache_info = g_malloc0(sizeof(AsanCacheInfo));
     cache_info->request_size = kreit_get_abi_param(env, 2);
+    thread_info->kmem_cache_create_requst_size = cache_info->request_size;
     cache_info->align = kreit_get_abi_param(env, 3);
-    flag = kreit_get_abi_param(env, 4);
+    // flag = kreit_get_abi_param(env, 4);
     /// FIXME: may vary from different machines
-    minimal_align = (flag & SLAB_HWCACHE_ALIGN) ? 64 : 8;
+    // minimal_align = (flag & SLAB_HWCACHE_ALIGN) ? 64 : 8;
+    minimal_align = 8;
     cache_info->align = (cache_info->align == 0) ? minimal_align : cache_info->align;
     ctor = kreit_get_abi_param(env, hook_info->param_order);
     cache_info->has_ctor = ctor ? true : false;
@@ -292,8 +294,99 @@ static void asan_trace_linux_kmem_cache_create_finished(KreitAsanState *appdata,
     }
 
     qemu_spin_lock(&appdata->asan_kmem_cache_lock);
-    g_hash_table_insert(appdata->asan_kmem_cache, (gpointer) cache_info->cache_addr, cache_info);
+    if (g_hash_table_lookup(appdata->asan_kmem_cache, (gpointer) cache_info->cache_addr)) {
+        // Existing slab cache means that the cache is created as an alias.
+        g_free(cache_info);
+        if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
+            qemu_log("qkasan: cache is created as alias, drop current new cache_info.\n");
+        }
+    } else {
+        g_hash_table_insert(appdata->asan_kmem_cache, (gpointer) cache_info->cache_addr, cache_info);
+    }
     qemu_spin_unlock(&appdata->asan_kmem_cache_lock);
+}
+
+static void asan_trace_linux_kmem_cache_alias(KreitAsanState *appdata,
+    CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+
+    sanitizer_state_stash_push(thread_info, pending_hook);
+
+    // pending_hook->kmem_cache_alias_new_size = kreit_get_abi_param(env, 2);
+
+    if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
+        qemu_log("qkasan: cpu %d pid %d cpl %d: kmem_cache_alias, new size: %ld\n",
+            current_cpu->cpu_index, *curr_cpu_data(current_pid), get_cpu_privilege(env),
+            pending_hook->kmem_cache_alias_new_size);
+    }
+}
+
+static void asan_trace_linux_kmem_cache_alias_finished(KreitAsanState *appdata,
+    CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+    vaddr cache_addr;
+    AsanCacheInfo *cache_info;
+    size_t old_request_size;
+    size_t new_request_size;
+
+    sanitizer_state_stash_pop(thread_info, pending_hook);
+
+    cache_addr = kreit_get_return_value(env);
+    if (cache_addr) {
+        qemu_spin_lock(&appdata->asan_kmem_cache_lock);
+        cache_info = g_hash_table_lookup(appdata->asan_kmem_cache, (gpointer) cache_addr);
+        qemu_spin_unlock(&appdata->asan_kmem_cache_lock);
+        new_request_size = thread_info->kmem_cache_create_requst_size;
+        old_request_size = cache_info->size;
+        cache_info->request_size = MAX(new_request_size, old_request_size);
+        cache_info->redzone_size = cache_info->size - ROUND_UP(cache_info->request_size, cache_info->align);
+        if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
+            qemu_log("qkasan: cpu %d pid %d cpl %d: kmem_cache_alias finished, old object size: %ld, new object size: %ld, new redzone size: %ld\n",
+                current_cpu->cpu_index, *curr_cpu_data(current_pid), get_cpu_privilege(env),
+                old_request_size, new_request_size, cache_info->redzone_size);
+        }
+    } else {
+        if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
+            qemu_log("qkasan: cpu %d pid %d cpl %d: kmem_cache_alias finished, no mergable cache found\n",
+                current_cpu->cpu_index, *curr_cpu_data(current_pid), get_cpu_privilege(env));
+        }
+    }
+}
+
+static void asan_trace_linux_kmem_cache_destroy(KreitAsanState *appdata,
+    CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+    vaddr cache_addr;
+
+    sanitizer_state_stash_push(thread_info, pending_hook);
+
+    cache_addr = kreit_get_abi_param(env, 1);
+
+    qemu_spin_lock(&appdata->asan_kmem_cache_lock);
+    g_hash_table_remove(appdata->asan_kmem_cache, (gpointer) cache_addr);
+    qemu_spin_unlock(&appdata->asan_kmem_cache_lock);
+
+    if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
+        qemu_log("qkasan: cpu %d pid %d cpl %d: kmem_cache_destory, cache addr %#018lx\n",
+            current_cpu->cpu_index, *curr_cpu_data(current_pid), get_cpu_privilege(env),
+            cache_addr);
+    }
+}
+
+static void asan_trace_linux_kmem_cache_destroy_finished(KreitAsanState *appdata,
+        CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+
+    sanitizer_state_stash_pop(thread_info, pending_hook);
+
+    if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
+        qemu_log("qkasan: cpu %d pid %d cpl %d: kmem_cache_destory finished\n",
+            current_cpu->cpu_index, *curr_cpu_data(current_pid), get_cpu_privilege(env));
+    }
 }
 
 static void asan_trace_linux_kmem_cache_alloc(KreitAsanState *appdata,
@@ -931,6 +1024,14 @@ static void app_asan_trace_hook(void *instr_data, void *userdata)
             pending_hook->trace_start = asan_trace_linux_kmem_cache_create;
             pending_hook->trace_finished = asan_trace_linux_kmem_cache_create_finished;
             break;
+        case ASAN_HOOK_KMEM_CACHE_ALIAS:
+            pending_hook->trace_start = asan_trace_linux_kmem_cache_alias;
+            pending_hook->trace_finished = asan_trace_linux_kmem_cache_alias_finished;
+            break;
+            case ASAN_HOOK_KMEM_CACHE_DESTORY:
+            pending_hook->trace_start = asan_trace_linux_kmem_cache_destroy;
+            pending_hook->trace_finished = asan_trace_linux_kmem_cache_destroy_finished;
+            break;
         case ASAN_HOOK_ALLOC_KMEM_CACHE:
             pending_hook->trace_start = asan_trace_linux_kmem_cache_alloc;
             pending_hook->trace_finished = asan_trace_linux_kmem_cache_alloc_finished;
@@ -1146,6 +1247,10 @@ static void get_asan_kernel_info(KreitAsanState *kas)
             kas->asan_hook[i].type = ASAN_HOOK_ALLOC_KMEM_CACHE;
         } else if (strcmp(hook_type, "kmem_cache_create") == 0) {
             kas->asan_hook[i].type = ASAN_HOOK_KMEM_CACHE_CREATE;
+        } else if (strcmp(hook_type, "kmem_cache_alias") == 0) {
+            kas->asan_hook[i].type = ASAN_HOOK_KMEM_CACHE_ALIAS;
+        } else if (strcmp(hook_type, "kmem_cache_destroy") == 0) {
+            kas->asan_hook[i].type = ASAN_HOOK_KMEM_CACHE_DESTORY;
         } else if (strcmp(hook_type, "size-in-regs") == 0) {
             kas->asan_hook[i].type = ASAN_HOOK_ALLOC_SIZE_IN_REGS;
         } else if (strcmp(hook_type, "alloc_bulk") == 0) {
