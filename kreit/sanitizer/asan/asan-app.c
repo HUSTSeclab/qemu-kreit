@@ -85,12 +85,12 @@ static size_t get_linux_alloc_size(KreitAsanState* kas,
     }
 }
 
-static size_t get_linux_cache_align(KreitAsanState* kas, CPUArchState *env)
-{
-    vaddr kmem_cache_ptr;
-    kmem_cache_ptr = kreit_get_abi_param(env, 1);
-    return kreit_cpu_ldl(env_cpu(env), kmem_cache_ptr + kas->align_offset);
-}
+// static size_t get_linux_cache_align(KreitAsanState* kas, CPUArchState *env)
+// {
+//     vaddr kmem_cache_ptr;
+//     kmem_cache_ptr = kreit_get_abi_param(env, 1);
+//     return kreit_cpu_ldl(env_cpu(env), kmem_cache_ptr + kas->align_offset);
+// }
 
 static void insert_allocated_info(AsanAllocatedInfo *allocated_info)
 {
@@ -214,38 +214,53 @@ static void asan_trace_linux_size_in_regs_finished(KreitAsanState *appdata,
     qemu_spin_unlock(&appdata->asan_allocated_info_lock);
 }
 
+#define SLAB_HWCACHE_ALIGN (1 << 4)
+
 static void asan_trace_linux_kmem_cache_create(KreitAsanState *appdata,
     CPUArchState* env, KreitPendingHook *pending_hook)
 {
     int pid = *curr_cpu_data(current_pid);
     AsanThreadInfo *thread_info = pending_hook->thread_info;
-    unsigned int request_size;
-    unsigned int new_size;
-    unsigned int align;
+    KreitAsanInstrInfo *hook_info = pending_hook->hook_info;
     vaddr ctor;
+    unsigned int new_size;
+    unsigned int flag;
+    unsigned int minimal_align;
     AsanCacheInfo *cache_info;
 
+    // kmem_cache_create will call kmem_cache_create_usercopy
+    if (thread_info->hook_func_not_return)
+        return;
     sanitizer_state_stash_push(thread_info, pending_hook);
 
-    request_size = (unsigned int) kreit_get_abi_param(env, 2);
-    align = (unsigned int) kreit_get_abi_param(env, 3);
-    ctor = kreit_get_abi_param(env, 5);
+    cache_info = g_malloc0(sizeof(AsanCacheInfo));
+    cache_info->request_size = kreit_get_abi_param(env, 2);
+    cache_info->align = kreit_get_abi_param(env, 3);
+    flag = kreit_get_abi_param(env, 4);
+    /// FIXME: may vary from different machines
+    minimal_align = (flag & SLAB_HWCACHE_ALIGN) ? 64 : 8;
+    cache_info->align = (cache_info->align == 0) ? minimal_align : cache_info->align;
+    ctor = kreit_get_abi_param(env, hook_info->param_order);
+    cache_info->has_ctor = ctor ? true : false;
 
     if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
-        qemu_log("qkasan: cpu %d pid %d cpl %d: kmem_cache_create with size: %d, align: %d\n",
+        vaddr name_addr;
+        char name[16];
+        uint64_t tmp_val;
+
+        name_addr = kreit_get_abi_param(env, 1);
+        tmp_val = kreit_cpu_ldq(env_cpu(env), name_addr);
+        memcpy(name, &tmp_val, 8);
+        tmp_val = kreit_cpu_ldq(env_cpu(env), name_addr + 8);
+        memcpy(name + 8, &tmp_val, 8);
+        name[15] = '\0';
+        qemu_log("qkasan: cpu %d pid %d cpl %d: kmem_cache_create with name %s, size: %ld, align: %ld, ctor: %#018lx\n",
             current_cpu->cpu_index, pid, get_cpu_privilege(env),
-            request_size, align);
+            name, cache_info->request_size, cache_info->align, ctor);
     }
 
-    cache_info = g_malloc0(sizeof(AsanCacheInfo));
-    cache_info->request_size = request_size;
     // Reset the cache size with redzone
-    if (align == 0)
-        align = 8;
-    if (ctor)
-        cache_info->has_ctor = true;
-    new_size = ROUND_UP(request_size, align) * 2;
-    cache_info->redzone_size = ROUND_UP(request_size, align);
+    new_size = ROUND_UP(cache_info->request_size, cache_info->align) * 2;
     pending_hook->cache_info = cache_info;
 
     // qemu_log("new request size %d\n", new_size);
@@ -259,17 +274,21 @@ static void asan_trace_linux_kmem_cache_create_finished(KreitAsanState *appdata,
     AsanThreadInfo *thread_info = pending_hook->thread_info;
     AsanCacheInfo *cache_info;
 
+    if (!pending_hook->cache_info)
+        return;
     sanitizer_state_stash_pop(thread_info, pending_hook);
 
     cache_info = pending_hook->cache_info;
     cache_info->cache_addr = kreit_get_return_value(env);
 
     cache_info->size = kreit_cpu_ldl(env_cpu(env), cache_info->cache_addr + appdata->size_offset);
+    cache_info->redzone_size = cache_info->size - ROUND_UP(cache_info->request_size, cache_info->align);
 
     if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
-        qemu_log("qkasan: cpu %d pid %d cpl %d: kmem_cache_create finished, return value: %#018lx, cache size: %ld\n",
+        qemu_log("qkasan: cpu %d pid %d cpl %d: kmem_cache_create finished, cache address: %#018lx, cache size: %ld, redzone size: %ld, current eip: %#018lx\n",
             current_cpu->cpu_index, pid, get_cpu_privilege(env),
-            cache_info->cache_addr, cache_info->size);
+            cache_info->cache_addr, cache_info->size, cache_info->redzone_size,
+            kreit_get_pc(env));
     }
 
     qemu_spin_lock(&appdata->asan_kmem_cache_lock);
@@ -282,7 +301,7 @@ static void asan_trace_linux_kmem_cache_alloc(KreitAsanState *appdata,
 {
     int pid = *curr_cpu_data(current_pid);
     size_t request_size;
-    size_t align_size;
+    // size_t align_size;
     vaddr cache_addr;
     int gfp_flag;
     AsanThreadInfo *thread_info = pending_hook->thread_info;
@@ -292,14 +311,14 @@ static void asan_trace_linux_kmem_cache_alloc(KreitAsanState *appdata,
     sanitizer_state_stash_push(thread_info, pending_hook);
 
     request_size = get_linux_alloc_size(appdata, env, pending_hook->hook_info);
-    align_size = get_linux_cache_align(appdata, env);
+    // align_size = get_linux_cache_align(appdata, env);
     cache_addr = kreit_get_abi_param(env, 1);
     gfp_flag = kreit_get_abi_param(env, pending_hook->hook_info->flag_order);
 
     if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
-        qemu_log("qkasan: cpu %d pid %d cpl %d: alloc (type: kmem_cache) size: %ld, align: %ld, ret addr: %#018lx, rsp: %#018lx\n",
+        qemu_log("qkasan: cpu %d pid %d cpl %d: alloc (type: kmem_cache) size: %ld, cache addr: %#018lx, ret addr: %#018lx, rsp: %#018lx\n",
             current_cpu->cpu_index, pid, get_cpu_privilege(env),
-            request_size, align_size,
+            request_size, cache_addr,
             pending_hook->ret_addr, pending_hook->stack_ptr);
     }
 
@@ -886,7 +905,6 @@ static void app_asan_trace_hook(void *instr_data, void *userdata)
     pending_hook->cpl = get_cpu_privilege(env);
 
     thread_info = curr_cpu_thread_info();
-    thread_info->hook_func_not_return = true;
     pending_hook->thread_info = thread_info;
 
     qemu_spin_lock(&appdata->pending_hooks_lock);
@@ -966,6 +984,8 @@ static void app_asan_trace_hook(void *instr_data, void *userdata)
 
     if (pending_hook->trace_start)
         pending_hook->trace_start(appdata, env, pending_hook);
+
+    thread_info->hook_func_not_return = true;
 }
 
 static void app_asan_trace_tb_start(void *instr_data, void *userdata)
@@ -1173,11 +1193,23 @@ static void get_asan_kernel_info(KreitAsanState *kas)
         }
         kas->size_offset = qdict_get_int(kcont.kernel_info, "offsetof(struct kmem_cache, size)");
 
+        if (!qdict_haskey(kcont.kernel_info, "offsetof(struct kmem_cache, object_size)")) {
+            qemu_log("kreit: no offsetof(struct kmem_cache, object_size) config provided\n");
+            g_assert(0);
+        }
+        kas->object_size_offset = qdict_get_int(kcont.kernel_info, "offsetof(struct kmem_cache, object_size)");
+
         if (!qdict_haskey(kcont.kernel_info, "offsetof(struct kmem_cache, align)")) {
             qemu_log("kreit: no offsetof(struct kmem_cache, align) config provided\n");
             g_assert(0);
         }
         kas->align_offset = qdict_get_int(kcont.kernel_info, "offsetof(struct kmem_cache, align)");
+
+        if (!qdict_haskey(kcont.kernel_info, "offsetof(struct kmem_cache, ctor)")) {
+            qemu_log("kreit: no offsetof(struct kmem_cache, ctor) config provided\n");
+            g_assert(0);
+        }
+        kas->ctor_offset = qdict_get_int(kcont.kernel_info, "offsetof(struct kmem_cache, ctor)");
     }
 }
 

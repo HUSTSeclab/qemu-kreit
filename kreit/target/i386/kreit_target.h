@@ -56,23 +56,7 @@ static const int abi_param_order[] = {
     R_R8,
     R_R9
 };
-
-static inline uint64_t kreit_get_abi_param(CPUArchState *env, int param_order)
-{
-    if (param_order - 1 >= sizeof(abi_param_order) / sizeof(int))
-        return 0;
-
-    return env->regs[abi_param_order[param_order - 1]];
-}
-
-static inline void kreit_set_abi_reg_param(CPUArchState *env, int param_order, uint64_t val)
-{
-    param_order = param_order - 1;
-    if (param_order >= sizeof(abi_param_order) / sizeof(int))
-        return;
-
-    env->regs[abi_param_order[param_order]] = val;
-}
+#define MAX_ABI_REG_PARAM (sizeof(abi_param_order) / sizeof(int))
 
 static inline uint64_t kreit_get_return_value(CPUArchState *env)
 {
@@ -92,6 +76,28 @@ static inline uint64_t kreit_get_stack_ptr(CPUArchState *env)
 static inline void kreit_set_stack_ptr(CPUArchState *env, uint64_t val)
 {
     env->regs[R_ESP] = val;
+}
+
+static inline uint64_t kreit_get_abi_param(CPUArchState *env, int param_order)
+{
+    vaddr rsp;
+
+    if (param_order <= MAX_ABI_REG_PARAM)
+        return env->regs[abi_param_order[param_order - 1]];
+
+    rsp = kreit_get_stack_ptr(env);
+    return kreit_cpu_ldq(env_cpu(env), rsp + 8 * (param_order - MAX_ABI_REG_PARAM));
+}
+
+static inline void kreit_set_abi_reg_param(CPUArchState *env, int param_order, uint64_t val)
+{
+    vaddr rsp;
+
+    if (param_order <= MAX_ABI_REG_PARAM)
+        env->regs[abi_param_order[param_order - 1]] = val;
+
+    rsp = kreit_get_stack_ptr(env);
+    kreit_cpu_stq(env_cpu(env), rsp + 8 * (param_order - MAX_ABI_REG_PARAM), val);
 }
 
 static inline void *kreit_get_regular_register_buf(CPUArchState *env)

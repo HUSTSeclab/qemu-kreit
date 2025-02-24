@@ -53,6 +53,8 @@ typedef struct AsanCacheInfo {
     vaddr cache_addr;
     size_t request_size;
     size_t size;
+    // size_t object_size;
+    size_t align;
     size_t redzone_size;
     bool has_ctor;
 } AsanCacheInfo;
@@ -69,6 +71,9 @@ typedef struct AsanThreadInfo {
 
     // context info
     bool hook_func_not_return;
+
+    // avoid the reentran of kmem_cache_create
+    // int in_kmem_cache_create;
 } AsanThreadInfo;
 
 typedef struct KreitPendingHook {
@@ -119,7 +124,9 @@ typedef struct KreitAsanState {
     KreitAsanInstrInfo *asan_hook;
     size_t nr_asan_hook;
     size_t size_offset;
+    size_t object_size_offset;
     size_t align_offset;
+    size_t ctor_offset;
 
     void *shadow_base;
 
