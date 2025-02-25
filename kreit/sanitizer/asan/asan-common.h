@@ -10,6 +10,7 @@
 typedef enum AsanHookType {
     ASAN_HOOK_TYPE_INVALID,
     ASAN_HOOK_ALLOC_KMEM_CACHE,
+    ASAN_HOOK_KMALLOC_TRACE,
     ASAN_HOOK_KMEM_CACHE_CREATE,
     ASAN_HOOK_KMEM_CACHE_ALIAS,
     ASAN_HOOK_KMEM_CACHE_DESTORY,
@@ -135,6 +136,7 @@ typedef struct KreitAsanState {
     size_t object_size_offset;
     size_t align_offset;
     size_t ctor_offset;
+    vaddr kmalloc_caches_addr;
 
     void *shadow_base;
 

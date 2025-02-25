@@ -214,6 +214,185 @@ static void asan_trace_linux_size_in_regs_finished(KreitAsanState *appdata,
     qemu_spin_unlock(&appdata->asan_allocated_info_lock);
 }
 
+static inline unsigned int __kmalloc_index(size_t size)
+{
+    // copy from slab.h
+
+    if (!size)
+        return 0;
+
+    if (size <= 8)
+        return 3;
+
+    if (size > 64 && size <= 96)
+        return 1;
+    if (size > 128 && size <= 192)
+        return 2;
+
+    if (size <=          8) return 3;
+    if (size <=         16) return 4;
+    if (size <=         32) return 5;
+    if (size <=         64) return 6;
+    if (size <=        128) return 7;
+    if (size <=        256) return 8;
+    if (size <=        512) return 9;
+    if (size <=       1024) return 10;
+    if (size <=   2 * 1024) return 11;
+    if (size <=   4 * 1024) return 12;
+    if (size <=   8 * 1024) return 13;
+    if (size <=  16 * 1024) return 14;
+    if (size <=  32 * 1024) return 15;
+    if (size <=  64 * 1024) return 16;
+    if (size <= 128 * 1024) return 17;
+    if (size <= 256 * 1024) return 18;
+    if (size <= 512 * 1024) return 19;
+    if (size <= 1024 * 1024) return 20;
+    if (size <=  2 * 1024 * 1024) return 21;
+
+    return -1;
+}
+
+#define __GFP_DMA (1 << 0)
+#define __GFP_RECLAIMABLE (1 << 4)
+#define __GFP_ACCOUNT (1 << 22)
+
+/*
+ * Define gfp bits that should not be set for KMALLOC_NORMAL.
+ */
+#define KMALLOC_NOT_NORMAL_BITS     \
+    (__GFP_RECLAIMABLE |            \
+    (__GFP_DMA) |	                \
+    (__GFP_ACCOUNT))
+
+static inline int kmalloc_type(int flags)
+{
+	/*
+	 * The most common case is KMALLOC_NORMAL, so test for it
+	 * with a single branch for all the relevant flags.
+	 */
+	if (likely((flags & KMALLOC_NOT_NORMAL_BITS) == 0))
+		return 0;
+
+	/*
+	 * At least one of the flags has to be set. Their priorities in
+	 * decreasing order are:
+	 *  1) __GFP_DMA
+	 *  2) __GFP_RECLAIMABLE
+	 *  3) __GFP_ACCOUNT
+	 */
+	if (flags & __GFP_DMA)
+		return 2;
+	if (flags & __GFP_RECLAIMABLE)
+		return 1;
+	else
+		return 3;
+}
+
+static void asan_trace_linux_kmalloc_trace(KreitAsanState *appdata,
+    CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    int pid = *curr_cpu_data(current_pid);
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+    int size_param_order = pending_hook->hook_info->param_order;
+    vaddr cache_addr;
+    size_t request_size;
+    int gfp_flag;
+    AsanAllocatedInfo *allocated_info;
+    // int old_kmalloc_index;
+    int new_kmalloc_index;
+    int kmalloc_cache_type;
+
+    sanitizer_state_stash_push(thread_info, pending_hook);
+
+    cache_addr = kreit_get_abi_param(env, 1);
+    gfp_flag = kreit_get_abi_param(env, 2);
+    request_size = kreit_get_abi_param(env, size_param_order);
+
+    allocated_info = alloc_asan_allocated_info();
+    allocated_info->request_size = request_size;
+    allocated_info->allocated_at =
+        kreit_cpu_ldq(env_cpu(env), kreit_get_stack_ptr(env)) - 5;
+    allocated_info->pid = pid;
+    copy_stack_to_allocated_info(env, allocated_info);
+
+    if (request_size <= 4096) {
+        // See slub.h, we refuse to increase the cache size if the cache
+        // size is too large. kmalloc_caches only has 13 entries
+
+        kmalloc_cache_type = kmalloc_type(gfp_flag);
+        // old_kmalloc_index = __kmalloc_index(request_size);
+        // choose the next kmalloc chunk size
+        // allocated_info->chunk_size = asan_allocator_aligned_size(
+        //     asan_allocator_aligned_size(request_size) + 1);
+        allocated_info->chunk_size = asan_allocator_aligned_size(
+            request_size + REDZONE_SIZE);
+        // Use larger kmalloc_caches[type][index + 1]
+        new_kmalloc_index = __kmalloc_index(allocated_info->chunk_size);
+        // cache_addr = cache_addr + (new_kmalloc_index - old_kmalloc_index) * 8;
+        cache_addr = kreit_cpu_ldq(env_cpu(env),
+            appdata->kmalloc_caches_addr +
+            kmalloc_cache_type * (8 * 14) +
+            new_kmalloc_index * 8);
+        kreit_set_abi_reg_param(env, 1, cache_addr);
+        kreit_set_abi_reg_param(env, size_param_order, allocated_info->chunk_size);
+        allocated_info->redzone_size = allocated_info->chunk_size - request_size;
+    } else if (request_size > 4096 && request_size < 8192) {
+        // do not change the kmalloc cache in this case
+        allocated_info->chunk_size = 8192;
+        allocated_info->redzone_size = allocated_info->chunk_size - request_size;
+    } else {
+        // do nothing
+        allocated_info->chunk_size = request_size;
+        allocated_info->redzone_size = 0;
+    }
+    if (gfp_flag & __GFP_ZERO)
+        pending_hook->value_initialized = true;
+
+    if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
+        qemu_log("qkasan: cpu %d pid %d cpl %d: alloc (type: kmalloc_trace) size: %ld, chunk_size: %ld, redzone size: %ld\n",
+            current_cpu->cpu_index, pid, get_cpu_privilege(env),
+            request_size, allocated_info->chunk_size, allocated_info->redzone_size);
+    }
+
+    // store the unmature allocated_info
+    pending_hook->allocated_info = allocated_info;
+}
+
+static void asan_trace_linux_kmalloc_trace_finished(KreitAsanState *appdata,
+    CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+    AsanAllocatedInfo *allocated_info = pending_hook->allocated_info;
+    vaddr redzone_start;
+
+    sanitizer_state_stash_pop(thread_info, pending_hook);
+
+    allocated_info->data_start = kreit_get_return_value(env);
+    allocated_info->in_use = true;
+
+    asan_unpoison_region(allocated_info->data_start,
+        allocated_info->chunk_size);
+
+    if (pending_hook->staged_msan_state && !pending_hook->value_initialized)
+        asan_poison_region(allocated_info->data_start,
+            allocated_info->chunk_size, MSAN_UNINITILIZED);
+    redzone_start = allocated_info->data_start +
+        allocated_info->chunk_size - allocated_info->redzone_size;
+    asan_poison_region(redzone_start,
+        allocated_info->redzone_size, ASAN_HEAP_RIGHT_RZ);
+
+    qemu_spin_lock(&appdata->asan_allocated_info_lock);
+    insert_allocated_info(allocated_info);
+    qemu_spin_unlock(&appdata->asan_allocated_info_lock);
+
+    if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
+        qemu_log("qkasan: cpu %d pid %d cpl %d: alloc (type: kmalloc_trace) finished, return value: %#018lx, current eip: %#018lx\n",
+            current_cpu->cpu_index, *curr_cpu_data(current_pid), get_cpu_privilege(env),
+            allocated_info->data_start,
+            kreit_get_pc(env));
+    }
+}
+
 #define SLAB_HWCACHE_ALIGN (1 << 4)
 
 static void asan_trace_linux_kmem_cache_create(KreitAsanState *appdata,
@@ -1038,6 +1217,10 @@ static void app_asan_trace_hook(void *instr_data, void *userdata)
             pending_hook->trace_start = asan_trace_linux_kmem_cache_alloc;
             pending_hook->trace_finished = asan_trace_linux_kmem_cache_alloc_finished;
             break;
+        case ASAN_HOOK_KMALLOC_TRACE:
+            pending_hook->trace_start = asan_trace_linux_kmalloc_trace;
+            pending_hook->trace_finished = asan_trace_linux_kmalloc_trace_finished;
+            break;
         case ASAN_HOOK_ALLOC_BULK:
             pending_hook->trace_start = asan_trace_linux_bulk_alloc;
             pending_hook->trace_finished = asan_trace_linux_bulk_alloc_finished;
@@ -1247,6 +1430,8 @@ static void get_asan_kernel_info(KreitAsanState *kas)
         const char *hook_type = qdict_get_str(entry_dict, "type");
         if (strcmp(hook_type, "kmem_cache") == 0) {
             kas->asan_hook[i].type = ASAN_HOOK_ALLOC_KMEM_CACHE;
+        } else if (strcmp(hook_type, "kmalloc_trace") == 0) {
+            kas->asan_hook[i].type = ASAN_HOOK_KMALLOC_TRACE;
         } else if (strcmp(hook_type, "kmem_cache_create") == 0) {
             kas->asan_hook[i].type = ASAN_HOOK_KMEM_CACHE_CREATE;
         } else if (strcmp(hook_type, "kmem_cache_alias") == 0) {
@@ -1317,6 +1502,13 @@ static void get_asan_kernel_info(KreitAsanState *kas)
             g_assert(0);
         }
         kas->ctor_offset = qdict_get_int(kcont.kernel_info, "offsetof(struct kmem_cache, ctor)");
+
+        if (!qdict_haskey(kcont.kernel_info, "kmalloc_caches-addr")) {
+            qemu_log("kreit: no kmalloc_caches-addr config provided\n");
+            g_assert(0);
+        }
+        const char *addr_str = qdict_get_str(kcont.kernel_info, "kmalloc_caches-addr");
+        kas->kmalloc_caches_addr = strtoull(addr_str, NULL, 16);
     }
 }
 
