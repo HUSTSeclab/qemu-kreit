@@ -338,14 +338,16 @@ static void asan_trace_linux_kmem_cache_alias_finished(KreitAsanState *appdata,
         qemu_spin_lock(&appdata->asan_kmem_cache_lock);
         cache_info = g_hash_table_lookup(appdata->asan_kmem_cache, (gpointer) cache_addr);
         qemu_spin_unlock(&appdata->asan_kmem_cache_lock);
-        new_request_size = thread_info->kmem_cache_create_requst_size;
-        old_request_size = cache_info->size;
-        cache_info->request_size = MAX(new_request_size, old_request_size);
-        cache_info->redzone_size = cache_info->size - ROUND_UP(cache_info->request_size, cache_info->align);
-        if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
-            qemu_log("qkasan: cpu %d pid %d cpl %d: kmem_cache_alias finished, old object size: %ld, new object size: %ld, new redzone size: %ld\n",
-                current_cpu->cpu_index, *curr_cpu_data(current_pid), get_cpu_privilege(env),
-                old_request_size, new_request_size, cache_info->redzone_size);
+        if (cache_info) {
+            new_request_size = thread_info->kmem_cache_create_requst_size;
+            old_request_size = cache_info->size;
+            cache_info->request_size = MAX(new_request_size, old_request_size);
+            cache_info->redzone_size = cache_info->size - ROUND_UP(cache_info->request_size, cache_info->align);
+            if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
+                qemu_log("qkasan: cpu %d pid %d cpl %d: kmem_cache_alias finished, old object size: %ld, new object size: %ld, new redzone size: %ld\n",
+                    current_cpu->cpu_index, *curr_cpu_data(current_pid), get_cpu_privilege(env),
+                    old_request_size, new_request_size, cache_info->redzone_size);
+            }
         }
     } else {
         if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
