@@ -31,7 +31,7 @@ typedef enum AsanHookType {
 typedef struct KreitAsanInstrInfo {
     AsanHookType type;
     int param_order;
-    int flag_order;
+    int param_order2;
     vaddr addr;
 } KreitAsanInstrInfo;
 

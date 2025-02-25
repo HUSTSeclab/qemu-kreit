@@ -135,7 +135,7 @@ static void asan_trace_linux_size_in_regs(KreitAsanState *appdata,
     sanitizer_state_stash_push(thread_info, pending_hook);
 
     request_size = get_linux_alloc_size(appdata, env, pending_hook->hook_info);
-    gfp_flag = kreit_get_abi_param(env, pending_hook->hook_info->flag_order);
+    gfp_flag = kreit_get_abi_param(env, pending_hook->hook_info->param_order2);
     if (gfp_flag & __GFP_ZERO)
         pending_hook->value_initialized = true;
 
@@ -408,7 +408,7 @@ static void asan_trace_linux_kmem_cache_alloc(KreitAsanState *appdata,
     request_size = get_linux_alloc_size(appdata, env, pending_hook->hook_info);
     // align_size = get_linux_cache_align(appdata, env);
     cache_addr = kreit_get_abi_param(env, 1);
-    gfp_flag = kreit_get_abi_param(env, pending_hook->hook_info->flag_order);
+    gfp_flag = kreit_get_abi_param(env, pending_hook->hook_info->param_order);
 
     if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
         qemu_log("qkasan: cpu %d pid %d cpl %d: alloc (type: kmem_cache) size: %ld, cache addr: %#018lx, ret addr: %#018lx, rsp: %#018lx\n",
@@ -1288,7 +1288,7 @@ static void get_asan_kernel_info(KreitAsanState *kas)
         const char *addr_str = qdict_get_str(entry_dict, "addr");
         kas->asan_hook[i].addr = strtoull(addr_str, NULL, 16);
         kas->asan_hook[i].param_order = qdict_get_try_int(entry_dict, "order", 0);
-        kas->asan_hook[i].flag_order = qdict_get_try_int(entry_dict, "flag-order", 0);
+        kas->asan_hook[i].param_order2 = qdict_get_try_int(entry_dict, "order2", 0);
 
         i++;
     }
