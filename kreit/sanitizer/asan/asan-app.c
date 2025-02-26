@@ -408,7 +408,7 @@ static void asan_trace_linux_kmem_cache_create(KreitAsanState *appdata,
     AsanCacheInfo *cache_info;
 
     // kmem_cache_create will call kmem_cache_create_usercopy
-    if (thread_info->hook_func_not_return)
+    if (thread_info->hook_func_nested_count)
         return;
     sanitizer_state_stash_push(thread_info, pending_hook);
 
@@ -887,7 +887,7 @@ static void asan_trace_memcpy(KreitAsanState *appdata, CPUArchState* env, KreitP
     size_t shadow_count;
     uint8_t shadow_byte;
 
-    if (thread_info->hook_func_not_return) {
+    if (thread_info->hook_func_nested_count) {
         pending_hook->ignore_finihsed_hook = true;
         return;
     }
@@ -958,7 +958,7 @@ static void asan_trace_memset(KreitAsanState *appdata, CPUArchState* env, KreitP
     size_t shadow_count;
     uint8_t shadow_byte;
 
-    if (thread_info->hook_func_not_return) {
+    if (thread_info->hook_func_nested_count) {
         pending_hook->ignore_finihsed_hook = true;
         return;
     }
@@ -1340,7 +1340,7 @@ static void app_asan_trace_hook(void *instr_data, void *userdata)
     if (pending_hook->trace_start)
         pending_hook->trace_start(appdata, env, pending_hook);
 
-    thread_info->hook_func_not_return = true;
+    thread_info->hook_func_nested_count++;
 }
 
 static void app_asan_trace_tb_start(void *instr_data, void *userdata)
@@ -1378,7 +1378,7 @@ static void app_asan_trace_tb_start(void *instr_data, void *userdata)
         return;
 
     thread_info = pending_hook->thread_info;
-    thread_info->hook_func_not_return = false;
+    thread_info->hook_func_nested_count--;
     if (thread_info->pid != pid) {
         // qemu_log("function finished in different thread.\n");
         // qemu_log("\talloc in thread %d, finished in thread %d\n", thread_info->pid, pid);
@@ -1415,7 +1415,7 @@ static void app_asan_trace_context_switch(void *instr_data, void *userdata)
     }
 
     strncpy(thread_info->process_name, spair->next_name, PROCESS_NAME_LENGTH);
-    if (strstr(spair->next_name, "poc") && !thread_info->hook_func_not_return)
+    if (strstr(spair->next_name, "poc") && (thread_info->hook_func_nested_count == 0))
         thread_info->msan_enabled = appdata->msan;
     appdata->cpu_thread_info[current_cpu->cpu_index] = thread_info;
     qemu_spin_unlock(&appdata->asan_threadinfo_lock);

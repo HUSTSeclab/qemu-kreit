@@ -74,7 +74,7 @@ typedef struct AsanThreadInfo {
     char process_name[PROCESS_NAME_LENGTH];
 
     // context info
-    bool hook_func_not_return;
+    int hook_func_nested_count;
 
     // avoid the reentran of kmem_cache_create
     // int in_kmem_cache_create;
