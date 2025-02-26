@@ -25,6 +25,7 @@ typedef enum AsanHookType {
     ASAN_HOOK_CLEAR_PAGE_REP,
     ASAN_HOOK_HANDLE_MM_PAGE_FAULT,
     ASAN_HOOK_MEMCPY,
+    ASAN_HOOK_MEMSET,
     ASAN_HOOK_QNX_SREALLOC,
     ASAN_HOOK_TYPE_END,
 } AsanHookType;
@@ -96,6 +97,8 @@ typedef struct KreitPendingHook {
     bool staged_msan_state;
     void (*trace_start)(KreitAsanState *appdata, CPUArchState *env, KreitPendingHook *thread_info);
     void (*trace_finished)(KreitAsanState *appdata, CPUArchState *env, KreitPendingHook *thread_info);
+
+    bool ignore_finihsed_hook;
 
     // store the unmature info
     AsanAllocatedInfo *allocated_info;

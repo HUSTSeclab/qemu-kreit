@@ -887,11 +887,17 @@ static void asan_trace_memcpy(KreitAsanState *appdata, CPUArchState* env, KreitP
     size_t shadow_count;
     uint8_t shadow_byte;
 
+    if (thread_info->hook_func_not_return) {
+        pending_hook->ignore_finihsed_hook = true;
+        return;
+    }
+
+    sanitizer_state_stash_push(thread_info, pending_hook);
+
     dest = kreit_get_abi_param(env, 1);
     src = kreit_get_abi_param(env, 2);
     count = kreit_get_abi_param(env, 3);
 
-    sanitizer_state_stash_push(thread_info, pending_hook);
     if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
         qemu_log("qkasan: cpu %d pid %d cpl %d: memcpy dest: %#018lx src: %#018lx count: %ld\n",
             current_cpu->cpu_index, pid, get_cpu_privilege(env),
@@ -933,10 +939,69 @@ static void asan_trace_memcpy_finished(KreitAsanState *appdata, CPUArchState* en
     AsanThreadInfo *thread_info = pending_hook->thread_info;
     vaddr memcpy_ret;
 
+    if (pending_hook->ignore_finihsed_hook)
+        return;
+
     sanitizer_state_stash_pop(thread_info, pending_hook);
     if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
         memcpy_ret = kreit_get_return_value(env);
-        qemu_log("memcpy return: %#018lx\n", memcpy_ret);
+        qemu_log("qkasan: memcpy return: %#018lx\n", memcpy_ret);
+    }
+}
+
+static void asan_trace_memset(KreitAsanState *appdata, CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+    vaddr dest;
+    size_t len;
+    void *dest_shadow;
+    size_t shadow_count;
+    uint8_t shadow_byte;
+
+    if (thread_info->hook_func_not_return) {
+        pending_hook->ignore_finihsed_hook = true;
+        return;
+    }
+
+    sanitizer_state_stash_push(thread_info, pending_hook);
+
+    dest = kreit_get_abi_param(env, 1);
+    len = kreit_get_abi_param(env, 3);
+
+    shadow_count = len >> 3;
+    if (asan_check_range(dest)) {
+        dest_shadow = get_shadow_addr(dest);
+        for (int i = 0; i < shadow_count; i++) {
+            shadow_byte = *((uint8_t *)(dest_shadow + i));
+            if (shadow_byte & ASAN_POISONED) {
+                asan_access_poisoned(env, dest + (i << 3), 8, ACCESS_TYPE_STORE);
+            }
+            if (shadow_byte & MSAN_UNINITILIZED) {
+                msan_store_uninitialized(env, dest + (i << 3), 8);
+            }
+        }
+    }
+
+    if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
+        qemu_log("qkasan: cpu %d pid %d cpl %d: memset dest: %#018lx len: %ld\n",
+            current_cpu->cpu_index, *curr_cpu_data(current_pid), get_cpu_privilege(env),
+            dest, len);
+    }
+}
+
+static void asan_trace_memset_finished(KreitAsanState *appdata, CPUArchState* env, KreitPendingHook *pending_hook)
+{
+    AsanThreadInfo *thread_info = pending_hook->thread_info;
+    uint64_t ret;
+
+    if (pending_hook->ignore_finihsed_hook)
+        return;
+
+    sanitizer_state_stash_pop(thread_info, pending_hook);
+
+    if (kreitapp_get_verbose(OBJECT(appdata)) >= 1) {
+        ret = kreit_get_return_value(env);
+        qemu_log("qksan: memset return: %#018lx\n", ret);
     }
 }
 
@@ -1260,6 +1325,10 @@ static void app_asan_trace_hook(void *instr_data, void *userdata)
             pending_hook->trace_start = asan_trace_memcpy;
             pending_hook->trace_finished = asan_trace_memcpy_finished;
             break;
+        case ASAN_HOOK_MEMSET:
+            pending_hook->trace_start = asan_trace_memset;
+            pending_hook->trace_finished = asan_trace_memset_finished;
+            break;
         case ASAN_HOOK_QNX_SREALLOC:
             pending_hook->trace_start = asan_trace_qnx_srealloc;
             pending_hook->trace_finished = asan_trace_qnx_srealloc_finished;
@@ -1460,6 +1529,8 @@ static void get_asan_kernel_info(KreitAsanState *kas)
             kas->asan_hook[i].type = ASAN_HOOK_HANDLE_MM_PAGE_FAULT;
         } else if (strcmp(hook_type, "memcpy") == 0) {
             kas->asan_hook[i].type = ASAN_HOOK_MEMCPY;
+        } else if (strcmp(hook_type, "memset") == 0) {
+            kas->asan_hook[i].type = ASAN_HOOK_MEMSET;
         } else if (strcmp(hook_type, "qnx-srealloc") == 0) {
             kas->asan_hook[i].type = ASAN_HOOK_QNX_SREALLOC;
         } else {
